@@ -31,6 +31,12 @@ function shuffleTake(arr, k) {
   return idx.slice(0, k).map((i) => arr[i]);
 }
 function downloadURL(url, name) { if (!url) return; const a = document.createElement("a"); a.href = url; a.download = name; a.click(); }
+// Collapse a track pool down to its unique artists (uses each track's `sub`).
+function artistPool(pool) {
+  const seen = new Map();
+  pool.forEach((t) => { if (t.sub && !seen.has(t.sub)) seen.set(t.sub, { id: "artist-" + seen.size, name: t.sub, sub: null, img: t.img || null }); });
+  return [...seen.values()];
+}
 async function shareURL(url, name, text) {
   if (!url) return;
   try { const b = await (await fetch(url)).blob(); const f = new File([b], name, { type: "image/png" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], text }); return; } } catch (e) {}
@@ -319,7 +325,7 @@ const GAMES = [
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 *{box-sizing:border-box}
-.mb-root{--ink:${INK};--paper:${PAPER};--red:${RED};--blue:${BLUE};min-height:100vh;background:var(--paper);color:var(--ink);font-family:'Space Grotesk',system-ui,sans-serif;background-image:radial-gradient(var(--ink) .6px,transparent .7px);background-size:6px 6px;padding:20px 16px 48px}
+.mb-root{--ink:${INK};--paper:${PAPER};--red:${RED};--blue:${BLUE};color-scheme:light;min-height:100vh;background:var(--paper);color:var(--ink);font-family:'Space Grotesk',system-ui,sans-serif;padding:20px 16px 48px}
 .mb-shell{max-width:760px;margin:0 auto}
 .mb-anton{font-family:'Anton',sans-serif;letter-spacing:.01em;text-transform:uppercase}
 .mb-mono{font-family:'Space Mono',monospace}
@@ -331,7 +337,7 @@ const CSS = `
 .mb-panel:hover{transform:translate(-2px,-2px);box-shadow:9px 9px 0 var(--ink)}.mb-panel:active{transform:translate(2px,2px);box-shadow:3px 3px 0 var(--ink)}
 .mb-tile{display:flex;align-items:center;justify-content:center;border-right:3px solid var(--ink);min-height:76px}.mb-tile img{width:100%;height:100%;object-fit:cover}.mb-tile .ini{color:var(--paper)}
 .mb-pb{padding:12px 14px;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0}
-.mb-name{font-size:24px;line-height:.96;word-break:break-word}.mb-sub{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.06em}
+.mb-name{font-size:24px;line-height:.96;word-break:break-word;color:var(--ink)}.mb-sub{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.06em;color:var(--ink)}
 .mb-corner{position:absolute;top:0;right:0;font-size:10px;letter-spacing:.18em;padding:4px 8px;color:var(--paper)}
 .mb-vs{align-self:center;justify-self:center;margin:10px auto;width:52px;height:52px;border:3px solid var(--ink);border-radius:50%;background:var(--paper);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:4px 4px 0 var(--ink);z-index:2;position:relative}
 .mb-panel.win{animation:sw .32s forwards}.mb-panel.out{animation:so .32s forwards}
@@ -364,9 +370,9 @@ const CSS = `
 .mb-hint{font-size:12px;opacity:.7;margin-top:8px;line-height:1.4}
 .mb-note{font-size:13px;line-height:1.5;border-left:3px solid var(--ink);padding-left:12px;margin:6px 0 16px}
 .mb-chip{display:inline-flex;align-items:center;gap:8px;background:var(--paper);border:2px solid var(--ink);padding:5px 10px 5px 5px;margin:4px;cursor:pointer;font-family:'Space Grotesk';box-shadow:2px 2px 0 var(--ink);max-width:100%}
-.mb-chip.sel{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--red)}.mb-chip.sel .mb-chip-name em{color:var(--paper)}
+.mb-chip.sel{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--red)}.mb-chip.sel .mb-chip-name,.mb-chip.sel .mb-chip-name em{color:var(--paper)}
 .mb-chip-img{width:26px;height:26px;flex:0 0 26px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--paper);font-size:10px;font-family:'Anton'}.mb-chip-img img{width:100%;height:100%;object-fit:cover}
-.mb-chip-name{font-size:13px;font-weight:600;line-height:1.1;text-align:left;display:flex;flex-direction:column}.mb-chip-name em{font-style:normal;font-size:10px;opacity:.6;text-transform:uppercase}
+.mb-chip-name{font-size:13px;font-weight:600;line-height:1.1;text-align:left;display:flex;flex-direction:column;color:var(--ink)}.mb-chip-name em{font-style:normal;font-size:10px;opacity:.6;text-transform:uppercase}
 .mb-tier{display:flex;border:3px solid var(--ink);border-bottom:none;min-height:64px;cursor:pointer}.mb-tier:last-of-type{border-bottom:3px solid var(--ink)}
 .mb-tier-label{width:64px;flex:0 0 64px;display:flex;align-items:center;justify-content:center;color:var(--paper);font-family:'Anton';font-size:28px;border-right:3px solid var(--ink)}
 .mb-tier-area{flex:1;display:flex;flex-wrap:wrap;align-content:flex-start;padding:4px;min-width:0}
@@ -378,7 +384,7 @@ const CSS = `
 .mb-slot:hover:not(:disabled){transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--ink)}
 .mb-slot:disabled{cursor:default}.mb-slot.filled{background:rgba(23,20,15,.06)}
 .mb-slotnum{width:54px;flex:0 0 54px;align-self:stretch;display:flex;align-items:center;justify-content:center;font-size:26px;background:var(--ink);color:var(--paper)}
-.mb-slottext{padding:8px 12px;font-size:15px;display:flex;flex-direction:column;min-width:0}
+.mb-slottext{padding:8px 12px;font-size:15px;display:flex;flex-direction:column;min-width:0;color:var(--ink)}
 .mb-slottext em{font-style:normal;opacity:.45;font-size:13px}.mb-slottext b{line-height:1.15}
 .mb-slottext b+em{opacity:.6;font-size:11px;text-transform:uppercase;margin-top:2px}
 @media(min-width:620px){.mb-vs-wrap{display:grid;grid-template-columns:1fr 52px 1fr;align-items:center}.mb-vs{margin:0 -6px}}
@@ -390,13 +396,14 @@ export default function App() {
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
   const [screen, setScreen] = useState("connect");   // connect | genres | menu | <game>
+  const [unit, setUnit] = useState("tracks");         // tracks | artists
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const styled = useRef(false);
   useEffect(() => { if (styled.current) return; styled.current = true; const el = document.createElement("style"); el.textContent = CSS; document.head.appendChild(el); }, []);
 
   // ---- A. genre (local, no API) ----
-  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setScreen("menu"); };
+  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setUnit("tracks"); setScreen("menu"); };
 
   // ---- B. one or more album links (live) ----
   const loadAlbums = useCallback(async () => {
@@ -429,6 +436,7 @@ export default function App() {
       if (items.length < 5) throw new Error(failed ? "Couldn't load enough tracks — some albums may be unavailable." : "Fewer than 5 tracks total — add another album.");
       setPool(items);
       setPoolLabel(names.length === 1 ? names[0] : `${names.length} albums`);
+      setUnit("tracks");
       setScreen("menu");
       if (failed) setError(`Loaded ${names.length} — ${failed} link${failed > 1 ? "s" : ""} couldn't be read and ${failed > 1 ? "were" : "was"} skipped.`);
     } catch (e) {
@@ -477,25 +485,36 @@ export default function App() {
       <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setScreen("connect")}>‹ Back</button></div>
     </div>
   );
-  else if (screen === "menu") body = (
-    <div className="mb-shell">
-      <div className="mb-bill"><div className="mb-anton mb-title">Choose a game</div><div className="mb-round mb-mono">{slice(poolLabel, 22)}<br />{pool.length} tracks</div></div>
-      {error && <div className="mb-err">{error}</div>}
-      {GAMES.map((gm) => {
-        const ok = pool.length >= gm.min;
-        return (
-          <div key={gm.k} className={"mb-card mb-gamecard" + (ok ? "" : " off")} onClick={() => ok && setScreen(gm.k)}>
-            <h2>{gm.t}</h2>
-            <p style={{ margin: 0 }}>{ok ? gm.d : `Needs at least ${gm.min} tracks — this pool has ${pool.length}.`}</p>
-          </div>
-        );
-      })}
-      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => { setError(""); setScreen("connect"); }}>‹ Change source</button></div>
-    </div>
-  );
-  else if (screen === "bracket") body = <Bracket pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
-  else if (screen === "blind") body = <BlindRank pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
-  else if (screen === "tier") body = <TierList pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
+  else if (screen === "menu") {
+    const artists = artistPool(pool);
+    const canArtists = artists.length >= 5;
+    const active = unit === "artists" ? artists : pool;
+    const noun = unit === "artists" ? "artists" : "tracks";
+    body = (
+      <div className="mb-shell">
+        <div className="mb-bill"><div className="mb-anton mb-title">Choose a game</div><div className="mb-round mb-mono">{slice(poolLabel, 22)}<br />{active.length} {noun}</div></div>
+        <div className="mb-toggle">
+          <button className={unit === "tracks" ? "on" : ""} onClick={() => setUnit("tracks")}>Tracks</button>
+          <button className={unit === "artists" ? "on" : ""} onClick={() => canArtists && setUnit("artists")} disabled={!canArtists} title={canArtists ? "" : "Not enough different artists in this pool"}>Artists</button>
+        </div>
+        {!canArtists && <p className="mb-note mb-mono">Artist mode needs at least 5 different artists — this pool has {artists.length}. Try a genre, or paste more albums.</p>}
+        {error && <div className="mb-err">{error}</div>}
+        {GAMES.map((gm) => {
+          const ok = active.length >= gm.min;
+          return (
+            <div key={gm.k} className={"mb-card mb-gamecard" + (ok ? "" : " off")} onClick={() => ok && setScreen(gm.k)}>
+              <h2>{gm.t}</h2>
+              <p style={{ margin: 0 }}>{ok ? gm.d : `Needs at least ${gm.min} ${noun} — this pool has ${active.length}.`}</p>
+            </div>
+          );
+        })}
+        <div className="mb-actions"><button className="mb-btn ghost" onClick={() => { setError(""); setScreen("connect"); }}>‹ Change source</button></div>
+      </div>
+    );
+  }
+  else if (screen === "bracket") body = <Bracket key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
+  else if (screen === "blind") body = <BlindRank key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
+  else if (screen === "tier") body = <TierList key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
 
   return <div className="mb-root">{body}</div>;
 }
