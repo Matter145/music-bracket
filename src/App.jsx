@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Analytics } from '@vercel/analytics/react';
 import { GENRES, genrePool } from "./data/index.js";
 
 /* ================================================================== *
@@ -497,5 +498,10 @@ export default function App() {
   else if (screen === "blind") body = <BlindRank pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
   else if (screen === "tier") body = <TierList pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
 
-  return <div className="mb-root">{body}</div>;
+  return (
+    <div className="mb-root">
+      {body}
+      <Analytics />
+    </div>
+  );
 }
