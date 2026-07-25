@@ -361,6 +361,13 @@ const CSS = `
 @media(min-width:640px){.mb-twocol{grid-template-columns:1fr 1fr;align-items:start}}
 .mb-tag{display:inline-block;font-family:'Space Mono';font-size:10px;letter-spacing:.1em;background:var(--ink);color:var(--paper);padding:2px 7px;margin-bottom:8px}.mb-tag.alt{background:var(--red)}
 .mb-genregrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mb-toggle{display:flex;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);margin:0 0 18px;background:var(--paper)}
+.mb-rankby{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.65;margin:2px 2px 6px}
+.mb-toggle button{flex:1;font-family:'Anton',sans-serif;text-transform:uppercase;letter-spacing:.04em;font-size:19px;padding:14px 10px;background:var(--paper);color:var(--ink);border:none;border-right:3px solid var(--ink);cursor:pointer;transition:background .1s}
+.mb-toggle button:last-child{border-right:none}
+.mb-toggle button.on{background:var(--ink);color:var(--paper)}
+.mb-toggle button:disabled{opacity:.35;cursor:not-allowed}
+.mb-toggle button:not(.on):not(:disabled):hover{background:rgba(23,20,15,.08)}
 @media(min-width:560px){.mb-genregrid{grid-template-columns:1fr 1fr 1fr}}
 .mb-genre{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;border:3px solid var(--ink);background:var(--paper);box-shadow:4px 4px 0 var(--ink);padding:16px 14px;cursor:pointer;transition:transform .1s,box-shadow .1s}
 .mb-genre:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--ink)}.mb-genre:active{transform:translate(2px,2px);box-shadow:none}
@@ -493,6 +500,7 @@ export default function App() {
     body = (
       <div className="mb-shell">
         <div className="mb-bill"><div className="mb-anton mb-title">Choose a game</div><div className="mb-round mb-mono">{slice(poolLabel, 22)}<br />{active.length} {noun}</div></div>
+        <div className="mb-rankby mb-mono">Rank by</div>
         <div className="mb-toggle">
           <button className={unit === "tracks" ? "on" : ""} onClick={() => setUnit("tracks")}>Tracks</button>
           <button className={unit === "artists" ? "on" : ""} onClick={() => canArtists && setUnit("artists")} disabled={!canArtists} title={canArtists ? "" : "Not enough different artists in this pool"}>Artists</button>
@@ -501,10 +509,11 @@ export default function App() {
         {error && <div className="mb-err">{error}</div>}
         {GAMES.map((gm) => {
           const ok = active.length >= gm.min;
+          const desc = unit === "artists" ? gm.d.replace(/\btrack\b/g, "artist").replace(/\btracks\b/g, "artists") : gm.d;
           return (
             <div key={gm.k} className={"mb-card mb-gamecard" + (ok ? "" : " off")} onClick={() => ok && setScreen(gm.k)}>
               <h2>{gm.t}</h2>
-              <p style={{ margin: 0 }}>{ok ? gm.d : `Needs at least ${gm.min} ${noun} — this pool has ${active.length}.`}</p>
+              <p style={{ margin: 0 }}>{ok ? desc : `Needs at least ${gm.min} ${noun} — this pool has ${active.length}.`}</p>
             </div>
           );
         })}
