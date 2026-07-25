@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { GENRES, genrePool } from "./data/index.js";
 
 /* ================================================================== *
  * Music Bracket
- * Paste a Spotify playlist or album link → play three games with it.
- *   · Bracket Battles   knockout of 16, live draw
- *   · Blind Rank Top 5  one track at a time, slots lock
- *   · Tier List         sort into S–D
- * No user login anywhere: an app-level token comes from /api/token,
- * so there is no 25-user development-mode cap.
+ * Two ways to play three games (Bracket · Blind Rank · Tier List):
+ *   A) Pick a genre  → built-in local song database, no API, instant
+ *   B) Paste albums  → one or more Spotify album links, fetched live
+ * The genre database is the driver; albums are the personal layer.
  * ================================================================== */
 
 const INK = "#17140F", PAPER = "#E9E3D4", RED = "#EE3B26", BLUE = "#2439DB";
@@ -19,7 +18,7 @@ function parseSpotifyLink(raw) {
   if (m) return { kind: m[1], id: m[2] };
   m = s.match(/^spotify:(playlist|album):([A-Za-z0-9]+)$/);
   if (m) return { kind: m[1], id: m[2] };
-  if (/^[A-Za-z0-9]{22}$/.test(s)) return { kind: "playlist", id: s };
+  if (/^[A-Za-z0-9]{22}$/.test(s)) return { kind: "album", id: s };
   return null;
 }
 
@@ -311,7 +310,6 @@ function TierList({ pool, label, onHome }) {
 }
 
 // ================= APP =================
-const DEMO = [["Chaise Longue","Wet Leg"],["Roman Holiday","Fontaines D.C."],["Starburster","Fontaines D.C."],["Danny Nedelko","IDLES"],["Mr. Motivator","IDLES"],["Never Fight a Man with a Perm","IDLES"],["Chandler","Shame"],["One Rizla","Shame"],["Narrator","Squid"],["Scratchcard Lanyard","Dry Cleaning"],["The Overload","Yard Act"],["Chaos Space Marine","Black Country, New Road"],["Concorde","Black Country, New Road"],["Nothing Matters","The Last Dinner Party"],["Sinner","The Last Dinner Party"],["John L","black midi"],["Angelica","Wet Leg"],["Green & Blue","The Murder Capital"]].map(([name, sub], i) => ({ id: "d" + i, name, sub, img: null }));
 const GAMES = [
   { k: "bracket", t: "Bracket Battles", d: "16 go in, one comes out. Knockout picks with a live draw.", min: 8 },
   { k: "blind", t: "Blind Rank Top 5", d: "One track at a time. Commit to a slot before you see what's next.", min: 5 },
@@ -353,6 +351,14 @@ const CSS = `
 .mb-card h2{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin:0 0 4px}.mb-card p{margin:0 0 12px;font-size:14px;line-height:1.45}
 .mb-gamecard{cursor:pointer;transition:transform .1s,box-shadow .1s}.mb-gamecard:hover{transform:translate(-2px,-2px);box-shadow:9px 9px 0 var(--ink)}
 .mb-gamecard.off{opacity:.45;cursor:not-allowed;box-shadow:3px 3px 0 var(--ink)}
+.mb-twocol{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:640px){.mb-twocol{grid-template-columns:1fr 1fr;align-items:start}}
+.mb-tag{display:inline-block;font-family:'Space Mono';font-size:10px;letter-spacing:.1em;background:var(--ink);color:var(--paper);padding:2px 7px;margin-bottom:8px}.mb-tag.alt{background:var(--red)}
+.mb-genregrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(min-width:560px){.mb-genregrid{grid-template-columns:1fr 1fr 1fr}}
+.mb-genre{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;border:3px solid var(--ink);background:var(--paper);box-shadow:4px 4px 0 var(--ink);padding:16px 14px;cursor:pointer;transition:transform .1s,box-shadow .1s}
+.mb-genre:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--ink)}.mb-genre:active{transform:translate(2px,2px);box-shadow:none}
+.mb-genre .mb-anton{font-size:18px;line-height:1}.mb-genre .mb-mono{font-size:11px;opacity:.6}
 .mb-input{width:100%;font-family:'Space Mono',monospace;font-size:13px;padding:10px 12px;border:3px solid var(--ink);background:var(--paper);color:var(--ink);resize:vertical}
 .mb-err{color:var(--red);font-family:'Space Mono',monospace;font-size:13px;margin-top:10px;font-weight:700;line-height:1.4}
 .mb-hint{font-size:12px;opacity:.7;margin-top:8px;line-height:1.4}
@@ -380,83 +386,111 @@ const CSS = `
 `;
 
 export default function App() {
-  const [link, setLink] = useState("");
+  const [links, setLinks] = useState("");
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
-  const [screen, setScreen] = useState("connect");
+  const [screen, setScreen] = useState("connect");   // connect | genres | menu | <game>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const styled = useRef(false);
   useEffect(() => { if (styled.current) return; styled.current = true; const el = document.createElement("style"); el.textContent = CSS; document.head.appendChild(el); }, []);
 
-  const loadLink = useCallback(async () => {
-    const parsed = parseSpotifyLink(link);
-    if (!parsed) { setError("That doesn't look like a playlist or album link."); return; }
+  // ---- A. genre (local, no API) ----
+  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setScreen("menu"); };
+
+  // ---- B. one or more album links (live) ----
+  const loadAlbums = useCallback(async () => {
+    const lines = links.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    if (!lines.length) { setError("Paste at least one album link."); return; }
+    const parsed = [], bad = [];
+    for (const l of lines) {
+      const p = parseSpotifyLink(l);
+      if (!p) bad.push(l);
+      else if (p.kind === "playlist") { setError("Playlists can't be read by Spotify's API any more — paste album links only."); return; }
+      else parsed.push(p);
+    }
+    if (!parsed.length) { setError("None of those look like album links. Copy from Spotify → an album → Share → Copy link."); return; }
     setLoading(true); setError("");
     try {
       const tr = await fetch("/api/token");
       if (!tr.ok) throw new Error("Couldn't get an app token — check the serverless function and its env vars.");
       const { access_token } = await tr.json();
       const H = { headers: { Authorization: "Bearer " + access_token } };
-      let items = [], label = "";
-      if (parsed.kind === "playlist") {
-        const meta = await fetch(`https://api.spotify.com/v1/playlists/${parsed.id}?fields=name`, H);
-        if (meta.status === 404) throw new Error("Not found. Spotify's own playlists (Discover Weekly, Top 50, editorial mixes) can't be read by the API — try one a person made.");
-        if (!meta.ok) throw new Error(`Spotify returned ${meta.status}.`);
-        label = (await meta.json()).name || "playlist";
-        const r = await fetch(`https://api.spotify.com/v1/playlists/${parsed.id}/tracks?limit=50&fields=items(track(id,name,artists(name),album(images)))`, H);
-        if (!r.ok) throw new Error(`Spotify returned ${r.status}.`);
-        items = (await r.json()).items.map((i) => i.track).filter((t) => t && t.id).map((t) => ({ id: t.id, name: t.name, sub: t.artists?.map((a) => a.name).join(", ") || null, img: t.album?.images?.length ? t.album.images[t.album.images.length - 1].url : null }));
-      } else {
-        const meta = await fetch(`https://api.spotify.com/v1/albums/${parsed.id}`, H);
-        if (!meta.ok) throw new Error(meta.status === 404 ? "Album not found." : `Spotify returned ${meta.status}.`);
+      let items = [], names = [], failed = bad.length;
+      for (const p of parsed) {
+        const meta = await fetch(`https://api.spotify.com/v1/albums/${p.id}`, H);
+        if (!meta.ok) { failed++; continue; }
         const al = await meta.json();
-        label = al.name;
         const img = al.images?.length ? al.images[al.images.length - 1].url : null;
-        items = (al.tracks?.items || []).map((t) => ({ id: t.id, name: t.name, sub: t.artists?.map((a) => a.name).join(", ") || null, img }));
+        names.push(al.name);
+        (al.tracks?.items || []).forEach((t) => items.push({ id: t.id, name: t.name, sub: t.artists?.map((a) => a.name).join(", ") || null, img }));
       }
-      const seen = new Set(); items = items.filter((t) => !seen.has(t.id) && seen.add(t.id));
-      if (items.length < 5) throw new Error("Need at least 5 tracks in there.");
-      setPool(items); setPoolLabel(label); setScreen("menu");
+      const seen = new Set(); items = items.filter((t) => t.id && !seen.has(t.id) && seen.add(t.id));
+      if (items.length < 5) throw new Error(failed ? "Couldn't load enough tracks — some albums may be unavailable." : "Fewer than 5 tracks total — add another album.");
+      setPool(items);
+      setPoolLabel(names.length === 1 ? names[0] : `${names.length} albums`);
+      setScreen("menu");
+      if (failed) setError(`Loaded ${names.length} — ${failed} link${failed > 1 ? "s" : ""} couldn't be read and ${failed > 1 ? "were" : "was"} skipped.`);
     } catch (e) {
       setError(e && e.message === "Failed to fetch"
-        ? "Can't reach Spotify from this preview — the sandbox blocks outside calls. Use the demo here; links work once you run or deploy the app."
+        ? "Can't reach Spotify from this preview — the sandbox blocks outside calls. Deploy to test album links; genres work anywhere."
         : (e.message || "Something went wrong."));
     } finally { setLoading(false); }
-  }, [link]);
-
-  const useDemo = () => { setPool(DEMO); setPoolLabel("demo · UK indie"); setScreen("menu"); };
+  }, [links]);
 
   let body;
   if (screen === "connect") body = (
     <div className="mb-shell">
-      <div className="mb-kicker">paste a playlist · play three games</div>
+      <div className="mb-kicker">pick a genre or paste albums · play three games</div>
       <h1 className="mb-anton mb-hero"><span className="l1">Music</span> <span className="l2">Bracket</span></h1>
       <div style={{ height: 18 }} />
-      <div className="mb-card">
-        <h2>Load a playlist or album</h2>
-        <p>Any Spotify link a person made. The games build their line-up from it.</p>
-        <textarea className="mb-input" rows={2} placeholder="https://open.spotify.com/playlist/…" value={link} onChange={(e) => setLink(e.target.value)} />
-        <div style={{ marginTop: 12 }}><button className="mb-btn" onClick={loadLink} disabled={loading}>{loading ? "Loading…" : "Load it"}</button></div>
-        {error && <div className="mb-err">{error}</div>}
-        <p className="mb-hint">Spotify's own playlists (Discover Weekly, Today's Top Hits, Daily Mix) can't be read by the API — use one a person made.</p>
+      <div className="mb-twocol">
+        <div className="mb-card" style={{ margin: 0 }}>
+          <span className="mb-tag">INSTANT · NO LINK</span>
+          <h2>Pick a genre</h2>
+          <p>Play from a built-in library of {GENRES.length} genres. Different draw every time.</p>
+          <button className="mb-btn" onClick={() => { setError(""); setScreen("genres"); }}>Browse genres</button>
+        </div>
+        <div className="mb-card" style={{ margin: 0 }}>
+          <span className="mb-tag alt">YOUR PICK</span>
+          <h2>Use albums</h2>
+          <p>Paste one or more Spotify album links — their tracks become the pool.</p>
+          <textarea className="mb-input" rows={3} placeholder={"https://open.spotify.com/album/…\n(one per line — add as many as you like)"} value={links} onChange={(e) => setLinks(e.target.value)} />
+          <div style={{ marginTop: 12 }}><button className="mb-btn ghost" onClick={loadAlbums} disabled={loading}>{loading ? "Loading…" : "Load albums"}</button></div>
+        </div>
       </div>
-      <div className="mb-card"><h2>No link handy?</h2><p>Play with a demo roster of UK indie / post-punk.</p><button className="mb-btn ghost" onClick={useDemo}>Use demo</button></div>
+      {error && <div className="mb-err" style={{ textAlign: "center" }}>{error}</div>}
+      <p className="mb-hint" style={{ textAlign: "center" }}>Album link: open an album in Spotify → the ⋯ menu → Share → Copy link. Playlists aren't supported — Spotify's API blocks them.</p>
+    </div>
+  );
+  else if (screen === "genres") body = (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Pick a genre</div><div className="mb-round mb-mono">{GENRES.length} to choose</div></div>
+      <div className="mb-genregrid">
+        {GENRES.map((g) => (
+          <button key={g.genre} className="mb-genre" onClick={() => pickGenre(g)}>
+            <span className="mb-anton">{g.genre}</span>
+            <span className="mb-mono">{g.tracks.length} tracks</span>
+          </button>
+        ))}
+      </div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setScreen("connect")}>‹ Back</button></div>
     </div>
   );
   else if (screen === "menu") body = (
     <div className="mb-shell">
       <div className="mb-bill"><div className="mb-anton mb-title">Choose a game</div><div className="mb-round mb-mono">{slice(poolLabel, 22)}<br />{pool.length} tracks</div></div>
+      {error && <div className="mb-err">{error}</div>}
       {GAMES.map((gm) => {
         const ok = pool.length >= gm.min;
         return (
           <div key={gm.k} className={"mb-card mb-gamecard" + (ok ? "" : " off")} onClick={() => ok && setScreen(gm.k)}>
             <h2>{gm.t}</h2>
-            <p style={{ margin: 0 }}>{ok ? gm.d : `Needs at least ${gm.min} tracks — this one has ${pool.length}.`}</p>
+            <p style={{ margin: 0 }}>{ok ? gm.d : `Needs at least ${gm.min} tracks — this pool has ${pool.length}.`}</p>
           </div>
         );
       })}
-      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setScreen("connect")}>‹ New playlist</button></div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => { setError(""); setScreen("connect"); }}>‹ Change source</button></div>
     </div>
   );
   else if (screen === "bracket") body = <Bracket pool={pool} label={poolLabel} onHome={() => setScreen("menu")} />;
