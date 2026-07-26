@@ -13,7 +13,7 @@ const INK = "#17140F", PAPER = "#E9E3D4", RED = "#EE3B26", BLUE = "#2439DB";
 
 // ---- BRANDING — edit these two lines only ----
 const HANDLE = "@CornishIndieRockGuy";
-const SITE_URL = "musicbracket.vercel.app";   // ← put your real site URL here (no https://)
+const SITE_URL = "https://music-bracket-1mj1.vercel.app/";   // ← put your real site URL here (no https://)
 
 // ---------- link parsing ----------
 function parseSpotifyLink(raw) {
@@ -47,6 +47,26 @@ async function shareURL(url, name, text) {
   downloadURL(url, name);
 }
 async function loadFonts() { try { await Promise.all([document.fonts.load('64px "Anton"'), document.fonts.load('700 20px "Space Grotesk"'), document.fonts.load('20px "Space Mono"')]); } catch (e) {} }
+function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+const _qrCache = {};
+async function qrDataUrl(text) {
+  if (_qrCache[text]) return _qrCache[text];
+  const QR = (await import("qrcode")).default;   // dynamic: absent in preview, present once installed
+  const u = await QR.toDataURL(text, { margin: 1, width: 240, color: { dark: "#17140F", light: "#E9E3D4" } });
+  _qrCache[text] = u; return u;
+}
+// Draws the QR bottom-right of a poster; silently no-ops if qrcode isn't installed.
+async function drawFooterQR(g, S) {
+  try {
+    const img = await loadImage(await qrDataUrl("https://" + SITE_URL));
+    const sz = 120, x = S - 48 - sz, y = S - 60 - sz;
+    g.fillStyle = PAPER; g.fillRect(x - 7, y - 7, sz + 14, sz + 14);
+    g.strokeStyle = INK; g.lineWidth = 3; g.strokeRect(x - 7, y - 7, sz + 14, sz + 14);
+    g.drawImage(img, x, y, sz, sz);
+    g.fillStyle = INK; g.font = '12px "Space Mono", monospace'; g.textAlign = "center";
+    g.fillText("SCAN TO PLAY", x + sz / 2, y + sz + 20); g.textAlign = "left";
+  } catch (e) { /* no qrcode available (preview) — poster renders without it */ }
+}
 function posterChrome(g, S, title, meta) {
   g.fillStyle = PAPER; g.fillRect(0, 0, S, S);
   g.fillStyle = "rgba(23,20,15,0.06)";
@@ -65,7 +85,18 @@ function posterChrome(g, S, title, meta) {
 }
 
 // ---------- bracket geometry ----------
-const ROW_H = 26, TOP = 18, COL_W = 132, PILL_W = 110, PILL_H = 22, LM = 8;
+const ROW_H = 36, TOP = 18, COL_W = 178, PILL_W = 152, PILL_H = 32, LM = 8;
+// Split a label onto up to two lines instead of truncating.
+function wrapLabel(name, max = 20) {
+  if (name.length <= max) return [name];
+  const words = name.split(" ");
+  let l1 = "";
+  for (const w of words) { if ((l1 + " " + w).trim().length <= max) l1 = (l1 + " " + w).trim(); else break; }
+  let l2 = name.slice(l1.length).trim();
+  if (!l1) { l1 = name.slice(0, max); l2 = name.slice(max); }
+  if (l2.length > max) l2 = l2.slice(0, max - 1) + "…";
+  return [l1, l2];
+}
 const colX = (c) => LM + c * COL_W;
 function seedOrder(n) { let r = [1]; while (r.length < n) { const s = r.length * 2, nx = []; for (const x of r) { nx.push(x); nx.push(s + 1 - x); } r = nx; } return r; }
 function computeGeometry(rounds) {
@@ -127,7 +158,9 @@ function BracketMap({ rounds, seeded }) {
         ? <rect key={c + "-" + i} x={colX(c)} y={p.y - PILL_H / 2} width={PILL_W} height={PILL_H} fill="none" stroke={INK} strokeWidth="1" strokeDasharray="3 3" opacity=".4" />
         : <g key={c + "-" + i} opacity={p.state === "lose" ? .45 : 1}>
             <rect x={colX(c)} y={p.y - PILL_H / 2} width={PILL_W} height={PILL_H} fill={fill(p.state)} stroke={p.cur ? RED : INK} strokeWidth={p.cur ? 3 : 1.5} />
-            <text x={colX(c) + 7} y={p.y + 3.5} fontFamily="Space Grotesk" fontWeight="700" fontSize="10.5" fill={txt(p.state)}>{slice(p.e.name, 13)}</text>
+            {(() => { const ls = wrapLabel(p.e.name, 20); return ls.length === 1
+              ? <text x={colX(c) + 8} y={p.y + 4} fontFamily="Space Grotesk" fontWeight="700" fontSize="11" fill={txt(p.state)}>{ls[0]}</text>
+              : <text x={colX(c) + 8} fontFamily="Space Grotesk" fontWeight="700" fontSize="11" fill={txt(p.state)}><tspan x={colX(c) + 8} y={p.y - 2}>{ls[0]}</tspan><tspan x={colX(c) + 8} y={p.y + 11}>{ls[1]}</tspan></text>; })()}
           </g>))}
     </svg>
   );
@@ -148,12 +181,13 @@ async function bracketImage(rounds, seeded, champ, meta) {
     const px = X(colX(c)), py = Y(p.y - PILL_H / 2), pw = PILL_W * sc, ph = PILL_H * sc, won = p.state === "win" || p.state === "champ";
     g.globalAlpha = p.state === "lose" ? .45 : 1;
     g.fillStyle = won ? INK : PAPER; g.fillRect(px, py, pw, ph); g.strokeStyle = INK; g.lineWidth = 1.5; g.strokeRect(px, py, pw, ph);
-    g.fillStyle = won ? PAPER : INK; g.font = `700 ${11 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 13), px + 5 * sc, py + ph / 2 + 4 * sc);
+    g.fillStyle = won ? PAPER : INK; g.font = `700 ${10.5 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 20), px + 5 * sc, py + ph / 2 + 4 * sc);
     g.globalAlpha = 1;
   }));
-  g.fillStyle = INK; g.fillRect(48, S - 200, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 150);
-  const nm = slice(champ.name, 18); g.font = '64px "Anton"';
-  g.fillStyle = BLUE; g.fillText(nm, 60, S - 92); g.fillStyle = RED; g.fillText(nm, 56, S - 96); g.fillStyle = INK; g.fillText(nm, 58, S - 94);
+  g.fillStyle = INK; g.fillRect(48, S - 300, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 262);
+  const nm = slice(champ.name, 16); g.font = '58px "Anton"';
+  g.fillStyle = BLUE; g.fillText(nm, 60, S - 206); g.fillStyle = RED; g.fillText(nm, 56, S - 210); g.fillStyle = INK; g.fillText(nm, 58, S - 208);
+  await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
 function Bracket({ pool, label, onHome }) {
@@ -218,6 +252,7 @@ async function blindImage(slots, label) {
     if (t.sub) { g.font = '20px "Space Mono"'; g.globalAlpha = .65; g.fillText(slice(t.sub, 34), 148, y + 20); g.globalAlpha = 1; }
     y += 108;
   });
+  await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
 function BlindRank({ pool, label, onHome }) {
@@ -277,7 +312,7 @@ const TIERS = [{ k: "S", c: RED }, { k: "A", c: BLUE }, { k: "B", c: INK }, { k:
 async function tierImage(items, placements, label) {
   await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
   posterChrome(g, S, "TIER LIST", label);
-  let y = 200; const rowH = 150, labelW = 120, x0 = 56, areaW = S - 112 - labelW;
+  let y = 190; const rowH = 136, labelW = 120, x0 = 56, areaW = S - 112 - labelW;
   TIERS.forEach((t) => {
     g.fillStyle = t.c; g.fillRect(x0, y, labelW, rowH - 12);
     g.fillStyle = PAPER; g.font = '54px "Anton"'; g.fillText(t.k, x0 + labelW / 2 - 16, y + rowH / 2 + 6);
@@ -290,6 +325,7 @@ async function tierImage(items, placements, label) {
     });
     y += rowH;
   });
+  await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
 function TierList({ pool, label, onHome }) {
@@ -488,8 +524,7 @@ export default function App() {
         </div>
       </div>
       {error && <div className="mb-err" style={{ textAlign: "center" }}>{error}</div>}
-      <p className="mb-hint" style={{ textAlign: "center" }}>Album link: open an album in Spotify → the ⋯ menu → Share → Copy link. Playlists aren't supported — Spotify's API blocks them.</p>
-      <div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div>
+      <p className="mb-hint" style={{ textAlign: "center" }}>Album link: open an album in Spotify → the ⋯ menu → Share → Copy link.</p>
     </div>
   );
   else if (screen === "genres") body = (
@@ -539,5 +574,5 @@ export default function App() {
   else if (screen === "blind") body = <BlindRank key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
   else if (screen === "tier") body = <TierList key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
 
-  return <div className="mb-root">{body}</div>;
+  return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
 }
