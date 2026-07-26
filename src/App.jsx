@@ -11,6 +11,10 @@ import { GENRES, genrePool } from "./data/index.js";
 
 const INK = "#17140F", PAPER = "#E9E3D4", RED = "#EE3B26", BLUE = "#2439DB";
 
+// ---- BRANDING — edit these two lines only ----
+const HANDLE = "@CornishIndieRockGuy";
+const SITE_URL = "musicbracket.vercel.app";   // ← put your real site URL here (no https://)
+
 // ---------- link parsing ----------
 function parseSpotifyLink(raw) {
   const s = (raw || "").trim();
@@ -51,7 +55,13 @@ function posterChrome(g, S, title, meta) {
   g.fillStyle = INK; g.textBaseline = "alphabetic";
   g.font = '58px "Anton", sans-serif'; g.fillText(title, 56, 112);
   g.font = '20px "Space Mono", monospace'; g.fillText(slice(meta.toUpperCase(), 44), 58, 142);
-  g.font = '18px "Space Mono", monospace'; g.globalAlpha = .6; g.fillText("made with Music Bracket", 58, S - 40); g.globalAlpha = 1;
+  // ---- branded footer: small mark + handle + URL ----
+  const fy = S - 44;
+  g.fillStyle = RED; g.fillRect(56, fy - 20, 26, 26);            // mark: red square…
+  g.fillStyle = PAPER; g.font = '700 18px "Anton"'; g.fillText("M", 62, fy); // …with an M
+  g.fillStyle = INK; g.font = '700 20px "Anton", sans-serif'; g.fillText(HANDLE.toUpperCase(), 92, fy);
+  g.font = '16px "Space Mono", monospace'; g.globalAlpha = .7;
+  g.fillText(SITE_URL, 92, fy + 22); g.globalAlpha = 1;
 }
 
 // ---------- bracket geometry ----------
@@ -141,9 +151,9 @@ async function bracketImage(rounds, seeded, champ, meta) {
     g.fillStyle = won ? PAPER : INK; g.font = `700 ${11 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 13), px + 5 * sc, py + ph / 2 + 4 * sc);
     g.globalAlpha = 1;
   }));
-  g.fillStyle = INK; g.fillRect(48, S - 150, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 100);
-  const nm = slice(champ.name, 18); g.font = '72px "Anton"';
-  g.fillStyle = BLUE; g.fillText(nm, 60, S - 54); g.fillStyle = RED; g.fillText(nm, 56, S - 58); g.fillStyle = INK; g.fillText(nm, 58, S - 56);
+  g.fillStyle = INK; g.fillRect(48, S - 200, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 150);
+  const nm = slice(champ.name, 18); g.font = '64px "Anton"';
+  g.fillStyle = BLUE; g.fillText(nm, 60, S - 92); g.fillStyle = RED; g.fillText(nm, 56, S - 96); g.fillStyle = INK; g.fillText(nm, 58, S - 94);
   return cv.toDataURL("image/png");
 }
 function Bracket({ pool, label, onHome }) {
@@ -172,7 +182,7 @@ function Bracket({ pool, label, onHome }) {
       <div className="mb-champ"><div className="eyebrow mb-mono">Tonight's headliner</div><h1 className="mb-anton headliner">{champ.name}</h1>{champ.sub && <div className="csub">{champ.sub}</div>}</div>
       {img ? <img className="mb-shareimg" src={img} alt="Bracket" style={{ width: 400 }} /> : <p className="mb-mono" style={{ textAlign: "center" }}>Rendering…</p>}
       <div className="mb-actions">
-        <button className="mb-btn" onClick={() => shareURL(img, "bracket.png", `My champion: ${champ.name}`)}>Share</button>
+        <button className="mb-btn" onClick={() => shareURL(img, "bracket.png", `My champion: ${champ.name}\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button>
         <button className="mb-btn ghost" onClick={() => downloadURL(img, "bracket.png")}>Save</button>
         <button className="mb-btn ghost" onClick={again}>Run it back</button>
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
@@ -254,7 +264,7 @@ function BlindRank({ pool, label, onHome }) {
         {img ? <img className="mb-shareimg" src={img} alt="Blind rank" style={{ width: 360 }} /> : <p className="mb-mono" style={{ textAlign: "center" }}>Rendering…</p>}
       </>}
       <div className="mb-actions">
-        {done && <><button className="mb-btn" onClick={() => shareURL(img, "blindrank.png", "My blind ranking")}>Share</button><button className="mb-btn ghost" onClick={() => downloadURL(img, "blindrank.png")}>Save</button></>}
+        {done && <><button className="mb-btn" onClick={() => shareURL(img, "blindrank.png", `My blind ranking\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button><button className="mb-btn ghost" onClick={() => downloadURL(img, "blindrank.png")}>Save</button></>}
         <button className="mb-btn ghost" onClick={reset}>{done ? "New five" : "Start over"}</button>
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
       </div>
@@ -308,7 +318,7 @@ function TierList({ pool, label, onHome }) {
       {finished && img && <img className="mb-shareimg" src={img} alt="Tier list" style={{ width: 380 }} />}
       <div className="mb-actions">
         {!finished ? <button className="mb-btn" onClick={finish} disabled={tray.length === items.length}>Finish</button>
-          : <><button className="mb-btn" onClick={() => shareURL(img, "tierlist.png", "My tier list")}>Share</button><button className="mb-btn ghost" onClick={() => downloadURL(img, "tierlist.png")}>Save</button></>}
+          : <><button className="mb-btn" onClick={() => shareURL(img, "tierlist.png", `My tier list\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button><button className="mb-btn ghost" onClick={() => downloadURL(img, "tierlist.png")}>Save</button></>}
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
       </div>
     </div>
@@ -363,6 +373,9 @@ const CSS = `
 .mb-genregrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mb-toggle{display:flex;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);margin:0 0 18px;background:var(--paper)}
 .mb-rankby{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.65;margin:2px 2px 6px}
+.mb-credit{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:26px;font-size:13px;font-family:'Space Mono',monospace;opacity:.85}
+.mb-credit b{font-family:'Anton',sans-serif;letter-spacing:.03em}
+.mb-credit-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--red);color:var(--paper);font-size:15px}
 .mb-toggle button{flex:1;font-family:'Anton',sans-serif;text-transform:uppercase;letter-spacing:.04em;font-size:19px;padding:14px 10px;background:var(--paper);color:var(--ink);border:none;border-right:3px solid var(--ink);cursor:pointer;transition:background .1s}
 .mb-toggle button:last-child{border-right:none}
 .mb-toggle button.on{background:var(--ink);color:var(--paper)}
@@ -476,6 +489,7 @@ export default function App() {
       </div>
       {error && <div className="mb-err" style={{ textAlign: "center" }}>{error}</div>}
       <p className="mb-hint" style={{ textAlign: "center" }}>Album link: open an album in Spotify → the ⋯ menu → Share → Copy link. Playlists aren't supported — Spotify's API blocks them.</p>
+      <div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div>
     </div>
   );
   else if (screen === "genres") body = (

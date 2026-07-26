@@ -111,5 +111,35 @@ export default {
     { name: "Greek Tragedy", sub: "The Wombats" },
     { name: "Kill the Director", sub: "The Wombats" },
     { name: "Techno Fan", sub: "The Wombats" },
+    // Blossoms
+    { name: "Charlemagne", sub: "Blossoms" },
+    { name: "Your Girlfriend", sub: "Blossoms" },
+    { name: "There's a Reason Why (I Never Returned Your Calls)", sub: "Blossoms" },
+    { name: "The Keeper", sub: "Blossoms" },
+    // Biffy Clyro
+    { name: "Many of Horror", sub: "Biffy Clyro" },
+    { name: "Mountains", sub: "Biffy Clyro" },
+    { name: "The Captain", sub: "Biffy Clyro" },
+    { name: "Bubbles", sub: "Biffy Clyro" },
+    { name: "Black Chandelier", sub: "Biffy Clyro" },
+    // The 1975
+    { name: "Chocolate", sub: "The 1975" },
+    { name: "Robbers", sub: "The 1975" },
+    { name: "Somebody Else", sub: "The 1975" },
+    { name: "The Sound", sub: "The 1975" },
+    { name: "It's Not Living (If It's Not with You)", sub: "The 1975" },
+    { name: "About You", sub: "The 1975" },
+    // Kings of Leon
+    { name: "Sex on Fire", sub: "Kings of Leon" },
+    { name: "Use Somebody", sub: "Kings of Leon" },
+    { name: "The Bucket", sub: "Kings of Leon" },
+    { name: "Molly's Chambers", sub: "Kings of Leon" },
+    { name: "Waste a Moment", sub: "Kings of Leon" },
+    // Vampire Weekend
+    { name: "A-Punk", sub: "Vampire Weekend" },
+    { name: "Oxford Comma", sub: "Vampire Weekend" },
+    { name: "Cape Cod Kwassa Kwassa", sub: "Vampire Weekend" },
+    { name: "Harmony Hall", sub: "Vampire Weekend" },
+    { name: "This Life", sub: "Vampire Weekend" },
   ],
 };
