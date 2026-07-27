@@ -263,7 +263,7 @@ export default {
     "The Vaccines": 15,
     "Two Door Cinema Club": 20,
     "Elbow": 15,
-    "Catfish and the Bottlemen": 15,
+    "Catfish and the Bottlemen": 20,
     "The Wombats": 15,
     "Blossoms": 15,
     "Circa Waves": 10,

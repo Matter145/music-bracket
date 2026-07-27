@@ -430,24 +430,34 @@ function Festival({ pools, label, onHome }) {
   const [days, setDays] = useState(null);
   const [budget, setBudget] = useState(null);
   const [placement, setPlacement] = useState({});   // artistId -> day index
-  const [assigning, setAssigning] = useState(null);  // artist awaiting a day choice
+  const [selected, setSelected] = useState({});      // artistId -> true (staged, not yet placed)
   const [done, setDone] = useState(false);
   const [img, setImg] = useState(null);
   const [openTiers, setOpenTiers] = useState({ 25: true });   // which price tiers are expanded
 
   const chosen = artists.filter((a) => placement[a.id] != null);
   const spent = chosen.reduce((s, a) => s + a.price, 0);
+  const stagedCost = artists.filter((a) => selected[a.id]).reduce((s, a) => s + a.price, 0);
   const remaining = (budget || 0) - spent;
+  const selCount = Object.keys(selected).length;
   const byDay = Array.from({ length: days || 0 }, (_, d) => artists.filter((a) => placement[a.id] === d));
 
-  const changeEra = (e) => { setEra(e); setPlacement({}); setAssigning(null); };
+  const changeEra = (e) => { setEra(e); setPlacement({}); setSelected({}); };
+  // Tap an artist: placed → remove it; unplaced → toggle in the staged selection (budget-blocked).
   const onChipTap = (a) => {
     if (placement[a.id] != null) { const p = { ...placement }; delete p[a.id]; setPlacement(p); return; }
-    if (a.price > remaining) return;
-    if (days === 1) { setPlacement({ ...placement, [a.id]: 0 }); return; }
-    setAssigning(a);
+    if (days === 1) { if (a.price <= remaining) setPlacement({ ...placement, [a.id]: 0 }); return; }
+    if (selected[a.id]) { const s = { ...selected }; delete s[a.id]; setSelected(s); return; }
+    if (stagedCost + a.price > remaining) return;   // would bust the budget
+    setSelected({ ...selected, [a.id]: true });
   };
-  const assignDay = (d) => { setPlacement({ ...placement, [assigning.id]: d }); setAssigning(null); };
+  // Tap a day in the sticky bar: drop the whole staged selection onto it.
+  const placeSelectedOn = (d) => {
+    if (!selCount) return;
+    const p = { ...placement };
+    Object.keys(selected).forEach((id) => { p[id] = d; });
+    setPlacement(p); setSelected({});
+  };
   const finish = async () => { setDone(true); try { setImg(await festivalImage(byDay, days, budget, spent, era === "All" ? "All Indie" : era)); } catch (e) {} };
 
   // 1. days
@@ -485,17 +495,6 @@ function Festival({ pools, label, onHome }) {
       </div>
     </div>
   );
-  // day-picker overlay
-  if (assigning) return (
-    <div className="mb-shell">
-      <div className="mb-bill"><div className="mb-anton mb-title">Add to…</div><div className="mb-round mb-mono">{slice(assigning.name, 20)}<br />£{assigning.price}</div></div>
-      <p className="mb-note mb-mono">Which day does {assigning.name} play?</p>
-      <div className="mb-sizegrid">{Array.from({ length: days }, (_, d) => (
-        <button key={d} className="mb-sizebtn mb-anton" style={{ fontSize: 18 }} onClick={() => assignDay(d)}>{DAY_NAMES[d]}<br /><span style={{ fontSize: 12 }}>{byDay[d].length} acts</span></button>
-      ))}</div>
-      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setAssigning(null)}>Cancel</button></div>
-    </div>
-  );
   // 3. builder
   const byTier = [25, 20, 15, 10, 5].map((p) => ({ p, list: artists.filter((a) => a.price === p) })).filter((t) => t.list.length);
   const pct = budget ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
@@ -525,8 +524,11 @@ function Festival({ pools, label, onHome }) {
             {open && (
               <div className="mb-fest-grid">
                 {t.list.map((a) => {
-                  const on = placement[a.id] != null; const afford = on || a.price <= remaining;
-                  return <button key={a.id} className={"mb-fest-chip" + (on ? " on" : "") + (afford ? "" : " cant")} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
+                  const on = placement[a.id] != null;
+                  const sel = !!selected[a.id];
+                  const afford = on || sel || (stagedCost + a.price <= remaining);
+                  const cls = "mb-fest-chip" + (on ? " on" : sel ? " sel" : "") + (afford ? "" : " cant");
+                  return <button key={a.id} className={cls} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
                 })}
               </div>
             )}
@@ -535,9 +537,19 @@ function Festival({ pools, label, onHome }) {
       })}
       <div className="mb-actions">
         <button className="mb-btn" onClick={finish} disabled={!chosen.length}>Finish lineup</button>
-        <button className="mb-btn ghost" onClick={() => { setDays(null); setBudget(null); setPlacement({}); }}>Restart</button>
+        <button className="mb-btn ghost" onClick={() => { setDays(null); setBudget(null); setPlacement({}); setSelected({}); }}>Restart</button>
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
       </div>
+      {days > 1 && (
+        <div className={"mb-daybar" + (selCount ? " active" : "")}>
+          <div className="mb-daybar-label mb-mono">{selCount ? `${selCount} selected · £${stagedCost} → add to` : "tap acts, then a day"}</div>
+          <div className="mb-daybar-btns">
+            {Array.from({ length: days }, (_, d) => (
+              <button key={d} className="mb-daybar-btn mb-anton" disabled={!selCount} onClick={() => placeSelectedOn(d)}>{DAY_NAMES[d].slice(0, 3)}<span className="mb-mono">{byDay[d].length}</span></button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -598,8 +610,20 @@ const CSS = `
 .mb-fest-grid{display:flex;flex-wrap:wrap;gap:6px;padding:10px}
 .mb-fest-chip{font-family:'Space Grotesk';font-size:13px;font-weight:600;color:var(--ink);background:var(--paper);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);padding:6px 10px;cursor:pointer}
 .mb-fest-chip.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--red)}
+.mb-fest-chip.sel{background:var(--blue);color:var(--paper);box-shadow:2px 2px 0 var(--ink)}
 .mb-fest-chip.cant{opacity:.3;cursor:not-allowed}
 .mb-fest-chip b{color:var(--red)}.mb-fest-chip.on b{color:var(--paper)}
+.mb-daybar{position:sticky;bottom:0;left:0;right:0;margin:16px -16px -48px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--paper);border-top:3px solid var(--ink);box-shadow:0 -4px 0 rgba(23,20,15,.12);z-index:20}
+.mb-daybar.active{border-top-color:var(--red);box-shadow:0 -4px 0 var(--red);animation:daypulse 1.1s ease-in-out infinite}
+@keyframes daypulse{50%{box-shadow:0 -6px 0 var(--red)}}
+.mb-daybar-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-align:center;margin-bottom:8px;color:var(--ink)}
+.mb-daybar-btns{display:flex;gap:8px}
+.mb-daybar-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:18px;padding:10px 4px;border:3px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer}
+.mb-daybar-btn span{font-size:10px;opacity:.6}
+.mb-daybar.active .mb-daybar-btn{background:var(--ink);color:var(--paper)}
+.mb-daybar.active .mb-daybar-btn span{opacity:.8}
+.mb-daybar-btn:disabled{opacity:.5;cursor:default}
+@media(prefers-reduced-motion:reduce){.mb-daybar.active{animation:none}}
 .mb-daystrip{display:flex;gap:8px;margin-bottom:16px}
 .mb-daycol{flex:1;border:3px solid var(--ink);background:var(--paper);box-shadow:3px 3px 0 var(--ink);min-height:70px;padding:6px}
 .mb-dayhead{font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-align:center;border-bottom:2px solid var(--ink);padding-bottom:4px;margin-bottom:4px;color:var(--ink)}
