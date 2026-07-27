@@ -13,7 +13,7 @@ const INK = "#17140F", PAPER = "#E9E3D4", RED = "#EE3B26", BLUE = "#2439DB";
 
 // ---- BRANDING — edit these two lines only ----
 const HANDLE = "@CornishIndieRockGuy";
-const SITE_URL = "https://music-bracket-1mj1.vercel.app/";   // ← put your real site URL here (no https://)
+const SITE_URL = "musicbracket.vercel.app";   // ← put your real site URL here (no https://)
 
 // ---------- link parsing ----------
 function parseSpotifyLink(raw) {
@@ -386,33 +386,39 @@ function TierList({ pool, label, onHome }) {
 }
 
 // ================= GAME 4: Festival Lineup =================
-const BUDGETS = [50, 100, 150];
+const BUDGETS = [50, 75, 100];
 const DAY_NAMES = ["Friday", "Saturday", "Sunday"];
-async function festivalImage(byDay, days, budget, label) {
+async function festivalImage(byDay, days, budget, spent, meta) {
   await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
-  posterChrome(g, S, "MY FESTIVAL", label);
-  const colW = (S - 112) / days, x0 = 56;
-  const top = 210, bottom = S - 250;
+  posterChrome(g, S, "MY FESTIVAL", meta);
+  const x0 = 56, regRight = S - 56, colW = (regRight - x0) / days;
+  const lineGap = 16, headerH = 44;
+  // build each day's lines with font sizes
+  const dayBlocks = byDay.map((acts) => {
+    const sorted = [...acts].sort((a, b) => b.price - a.price);
+    return sorted.map((a, i) => ({ name: i === 0 ? a.name.toUpperCase() : a.name, size: i === 0 ? 40 : i < 3 ? 26 : 20 }));
+  });
+  const heights = dayBlocks.map((lines) => lines.reduce((h, l) => h + l.size + lineGap, 0));
+  const contentH = headerH + Math.max(60, ...heights);
+  const regTop = 200, regBottom = S - 150;
+  // vertically centre the bill (slight upward bias)
+  const blockTop = regTop + Math.max(0, (regBottom - regTop - contentH) * 0.42);
+  const dividerBottom = blockTop + contentH;
+  g.textAlign = "center";
   for (let d = 0; d < days; d++) {
     const cx = x0 + colW * d + colW / 2;
-    const acts = [...byDay[d]].sort((a, b) => b.price - a.price);
-    // day divider
-    if (d > 0) { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.moveTo(x0 + colW * d, top - 4); g.lineTo(x0 + colW * d, bottom); g.stroke(); }
-    g.textAlign = "center"; g.fillStyle = INK;
-    g.font = '20px "Space Mono"'; g.fillText(DAY_NAMES[d].toUpperCase(), cx, top);
-    let y = top + 46;
-    acts.forEach((a, i) => {
-      const size = i === 0 ? Math.min(34, (colW - 20) / 4) : i < 3 ? 20 : 15;
-      g.font = `${size}px "Anton"`;
-      const nm = i === 0 ? a.name.toUpperCase() : a.name;
-      const maxc = Math.floor((colW - 16) / (size * 0.5));
-      g.fillText(slice(nm, Math.max(8, maxc)), cx, y);
-      y += size + 10;
+    if (d > 0) { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.moveTo(x0 + colW * d, blockTop - 8); g.lineTo(x0 + colW * d, dividerBottom); g.stroke(); }
+    g.fillStyle = INK; g.font = '20px "Space Mono"'; g.fillText(DAY_NAMES[d].toUpperCase(), cx, blockTop + 18);
+    let y = blockTop + headerH + 26;
+    dayBlocks[d].forEach((l) => {
+      g.font = `${l.size}px "Anton"`;
+      const maxc = Math.floor((colW - 14) / (l.size * 0.52));
+      g.fillText(slice(l.name, Math.max(8, maxc)), cx, y);
+      y += l.size + lineGap;
     });
   }
   g.textAlign = "left"; g.fillStyle = INK; g.font = '18px "Space Mono"'; g.globalAlpha = .7;
-  const total = byDay.flat().length;
-  g.fillText(`${days} day${days > 1 ? "s" : ""} · ${total} acts · £${budget} budget`, 56, S - 236); g.globalAlpha = 1;
+  g.fillText(`${days} day${days > 1 ? "s" : ""} · ${byDay.flat().length} acts · £${spent} spent`, 56, S - 236); g.globalAlpha = 1;
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
@@ -427,6 +433,7 @@ function Festival({ pools, label, onHome }) {
   const [assigning, setAssigning] = useState(null);  // artist awaiting a day choice
   const [done, setDone] = useState(false);
   const [img, setImg] = useState(null);
+  const [openTiers, setOpenTiers] = useState({ 25: true });   // which price tiers are expanded
 
   const chosen = artists.filter((a) => placement[a.id] != null);
   const spent = chosen.reduce((s, a) => s + a.price, 0);
@@ -441,7 +448,7 @@ function Festival({ pools, label, onHome }) {
     setAssigning(a);
   };
   const assignDay = (d) => { setPlacement({ ...placement, [assigning.id]: d }); setAssigning(null); };
-  const finish = async () => { setDone(true); try { setImg(await festivalImage(byDay, days, budget, era === "All" ? label : era)); } catch (e) {} };
+  const finish = async () => { setDone(true); try { setImg(await festivalImage(byDay, days, budget, spent, era === "All" ? "All Indie" : era)); } catch (e) {} };
 
   // 1. days
   if (!days) return (
@@ -506,17 +513,26 @@ function Festival({ pools, label, onHome }) {
           ))}
         </div>
       )}
-      {byTier.map((t) => (
-        <div key={t.p} className="mb-fest-tier">
-          <div className="mb-fest-price mb-anton">£{t.p}</div>
-          <div className="mb-fest-grid">
-            {t.list.map((a) => {
-              const on = placement[a.id] != null; const afford = on || a.price <= remaining;
-              return <button key={a.id} className={"mb-fest-chip" + (on ? " on" : "") + (afford ? "" : " cant")} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
-            })}
+      {byTier.map((t) => {
+        const open = !!openTiers[t.p];
+        const picks = t.list.filter((a) => placement[a.id] != null).length;
+        return (
+          <div key={t.p} className="mb-fest-sec">
+            <button className="mb-fest-sechead" onClick={() => setOpenTiers({ ...openTiers, [t.p]: !open })}>
+              <span className="mb-anton">£{t.p}</span>
+              <span className="mb-mono">{t.list.length} acts{picks ? ` · ${picks} picked` : ""} <b>{open ? "–" : "+"}</b></span>
+            </button>
+            {open && (
+              <div className="mb-fest-grid">
+                {t.list.map((a) => {
+                  const on = placement[a.id] != null; const afford = on || a.price <= remaining;
+                  return <button key={a.id} className={"mb-fest-chip" + (on ? " on" : "") + (afford ? "" : " cant")} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
       <div className="mb-actions">
         <button className="mb-btn" onClick={finish} disabled={!chosen.length}>Finish lineup</button>
         <button className="mb-btn ghost" onClick={() => { setDays(null); setBudget(null); setPlacement({}); }}>Restart</button>
@@ -575,10 +591,11 @@ const CSS = `
 .mb-toggle{display:flex;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);margin:0 0 18px;background:var(--paper)}
 .mb-rankby{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.65;margin:2px 2px 6px}
 .mb-sizegrid{display:flex;gap:12px;justify-content:center;margin:10px 0 20px}
-.mb-fest-tier{display:flex;gap:12px;border:3px solid var(--ink);border-bottom:none;padding:10px;align-items:flex-start}
-.mb-fest-tier:last-of-type{border-bottom:3px solid var(--ink)}
-.mb-fest-price{flex:0 0 52px;font-size:22px;color:var(--ink);padding-top:4px}
-.mb-fest-grid{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.mb-fest-sec{border:3px solid var(--ink);border-bottom:none}
+.mb-fest-sec:last-of-type{border-bottom:3px solid var(--ink)}
+.mb-fest-sechead{width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--paper);color:var(--ink);border:none;border-bottom:2px solid var(--ink);padding:12px 14px;cursor:pointer;font-size:20px}
+.mb-fest-sechead .mb-mono{font-size:12px;opacity:.7}.mb-fest-sechead b{font-size:18px;margin-left:4px}
+.mb-fest-grid{display:flex;flex-wrap:wrap;gap:6px;padding:10px}
 .mb-fest-chip{font-family:'Space Grotesk';font-size:13px;font-weight:600;color:var(--ink);background:var(--paper);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);padding:6px 10px;cursor:pointer}
 .mb-fest-chip.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--red)}
 .mb-fest-chip.cant{opacity:.3;cursor:not-allowed}
