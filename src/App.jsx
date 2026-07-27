@@ -674,7 +674,7 @@ const CSS = `
 @media(prefers-reduced-motion:reduce){.mb-panel,.mb-btn,.mb-gamecard,.mb-slot{transition:none}.mb-panel.win,.mb-panel.out,.mb-champ,.mb-nowcard.flash{animation:none}}
 `;
 
-export default function App() {
+function App() {
   const [links, setLinks] = useState("");
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
@@ -815,10 +815,10 @@ export default function App() {
 
 import { Analytics } from "@vercel/analytics/react";
 
-export default function App() {
+export default function MusicBracket() {
   return (
     <>
-      {MusicBracket /}
+      <App />
       <Analytics />
     </>
   );
