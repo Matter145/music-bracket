@@ -3,7 +3,7 @@ import { GENRES, genrePool, genreArtists, combinedArtists } from "./data/index.j
 
 /* ================================================================== *
  * Music Bracket
- * Two ways to play three games (Bracket · Blind Rank · Tier List):
+ * Two ways to play four games (Bracket · Blind Rank · Tier List · Festival):
  *   A) Pick a genre  → built-in local song database, no API, instant
  *   B) Paste albums  → one or more Spotify album links, fetched live
  * The genre database is the driver; albums are the personal layer.
@@ -581,7 +581,7 @@ function Festival({ pools, label, onHome }) {
 
 // ================= APP =================
 const GAMES = [
-  { k: "bracket", t: "Bracket Battles", d: "16 go in, one comes out. Knockout picks with a live draw.", min: 8 },
+  { k: "bracket", t: "Bracket Battles", d: "Pick 8, 16 or 32 — one comes out. Knockout picks with a live draw.", min: 8 },
   { k: "blind", t: "Blind Rank Top 5", d: "One track at a time. Commit to a slot before you see what's next.", min: 5 },
   { k: "tier", t: "Tier List", d: "Sort them into S–D and share the grid.", min: 5 },
 ];
@@ -756,7 +756,7 @@ export default function App() {
   let body;
   if (screen === "connect") body = (
     <div className="mb-shell">
-      <div className="mb-kicker">pick a genre or paste albums · play three games</div>
+      <div className="mb-kicker">pick a genre or paste albums · play the games</div>
       <h1 className="mb-anton mb-hero"><span className="l1">Music</span> <span className="l2">Bracket</span></h1>
       <div style={{ height: 18 }} />
       <div className="mb-twocol">
