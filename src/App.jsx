@@ -3,7 +3,7 @@ import { GENRES, genrePool, genreArtists, combinedArtists } from "./data/index.j
 
 /* ================================================================== *
  * Music Bracket
- * Two ways to play four games (Bracket · Blind Rank · Tier List · Festival lineup):
+ * Two ways to play three games (Bracket · Blind Rank · Tier List):
  *   A) Pick a genre  → built-in local song database, no API, instant
  *   B) Paste albums  → one or more Spotify album links, fetched live
  * The genre database is the driver; albums are the personal layer.
@@ -177,22 +177,44 @@ function BracketMap({ rounds, seeded }) {
 async function bracketImage(rounds, seeded, champ, meta) {
   await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
   posterChrome(g, S, "BRACKET BATTLES", meta);
-  const geo = computeGeometry(rounds), cols = buildColumns(rounds, seeded, geo), R = rounds.length, n = rounds[0].length * 2;
-  const Wb = colX(R) + PILL_W + LM, Hb = TOP * 2 + n * ROW_H, regX = 56, regY = 180, regW = S - 112, regH = 560;
-  const sc = Math.min(regW / Wb, regH / Hb), ox = regX + (regW - Wb * sc) / 2, oy = regY + (regH - Hb * sc) / 2, X = (v) => ox + v * sc, Y = (v) => oy + v * sc;
-  g.strokeStyle = INK; g.lineWidth = 1.5;
-  for (let c = 0; c < R; c++) for (let m = 0; m < rounds[c].length; m++) {
-    const yA = cols[c][m * 2].y, yB = cols[c][m * 2 + 1].y, yT = cols[c + 1][m].y, x1 = colX(c) + PILL_W, x2 = colX(c + 1), xm = (x1 + x2) / 2;
-    g.globalAlpha = .5; g.beginPath(); g.moveTo(X(x1), Y(yA)); g.lineTo(X(xm), Y(yA)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(x1), Y(yB)); g.lineTo(X(xm), Y(yB)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(xm), Y(yT)); g.lineTo(X(x2), Y(yT)); g.stroke(); g.globalAlpha = 1;
+  const R = rounds.length, n = rounds[0].length * 2;
+  const geo = computeGeometry(rounds), cols = buildColumns(rounds, seeded, geo);
+  // mirrored bracket-space geometry: left half flows right, right half flows left, meeting centre
+  const PW = 150, PH = 30, COL = 168, ROW = 38, TOPB = 10, GAP = 92;
+  const Wb = 2 * (R - 1) * COL + 2 * PW + GAP, Hb = (n / 2) * ROW + 2 * TOPB;
+  const regX = 40, regY = 168, regW = S - 80, regH = 578;
+  const sc = Math.min(regW / Wb, regH / Hb), ox = regX + (regW - Wb * sc) / 2, oy = regY + (regH - Hb * sc) / 2;
+  const X = (v) => ox + v * sc, Y = (v) => oy + v * sc;
+  // per-side vertical centres for each column
+  const ys = [[]]; for (let i = 0; i < n / 2; i++) ys[0].push(TOPB + i * ROW + ROW / 2);
+  for (let c = 1; c < R; c++) { ys[c] = []; for (let i = 0; i < ys[c - 1].length / 2; i++) ys[c].push((ys[c - 1][2 * i] + ys[c - 1][2 * i + 1]) / 2); }
+  const leftX = (c) => c * COL, rightX = (c) => Wb - PW - c * COL;
+  // connectors (both sides)
+  g.strokeStyle = INK; g.lineWidth = 1.5; g.globalAlpha = .5;
+  for (let c = 0; c < R - 1; c++) for (let i = 0; i < ys[c + 1].length; i++) {
+    const yA = ys[c][2 * i], yB = ys[c][2 * i + 1], yT = ys[c + 1][i];
+    let x1 = leftX(c) + PW, x2 = leftX(c + 1), xm = (x1 + x2) / 2;
+    g.beginPath(); g.moveTo(X(x1), Y(yA)); g.lineTo(X(xm), Y(yA)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(x1), Y(yB)); g.lineTo(X(xm), Y(yB)); g.lineTo(X(xm), Y(yT)); g.lineTo(X(x2), Y(yT)); g.stroke();
+    x1 = rightX(c); x2 = rightX(c + 1) + PW; xm = (x1 + x2) / 2;
+    g.beginPath(); g.moveTo(X(x1), Y(yA)); g.lineTo(X(xm), Y(yA)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(x1), Y(yB)); g.lineTo(X(xm), Y(yB)); g.lineTo(X(xm), Y(yT)); g.lineTo(X(x2), Y(yT)); g.stroke();
   }
-  cols.forEach((pills, c) => pills.forEach((p) => {
-    if (p.state === "empty") return;
-    const px = X(colX(c)), py = Y(p.y - PILL_H / 2), pw = PILL_W * sc, ph = PILL_H * sc, won = p.state === "win" || p.state === "champ";
+  // centre: finalists converge on a diamond node
+  const yc = ys[R - 1][0], cX = Wb / 2;
+  g.beginPath(); g.moveTo(X(leftX(R - 1) + PW), Y(yc)); g.lineTo(X(cX), Y(yc)); g.moveTo(X(rightX(R - 1)), Y(yc)); g.lineTo(X(cX), Y(yc)); g.stroke(); g.globalAlpha = 1;
+  const dsz = 7 * sc; g.fillStyle = INK; g.beginPath(); g.moveTo(X(cX), Y(yc) - dsz); g.lineTo(X(cX) + dsz, Y(yc)); g.lineTo(X(cX), Y(yc) + dsz); g.lineTo(X(cX) - dsz, Y(yc)); g.closePath(); g.fill();
+  // pills (split each column into left half + right half)
+  const drawPill = (p, bx, by) => {
+    if (!p || p.state === "empty") return;
+    const px = X(bx), py = Y(by - PH / 2), pw = PW * sc, ph = PH * sc, won = p.state === "win" || p.state === "champ";
     g.globalAlpha = p.state === "lose" ? .45 : 1;
-    g.fillStyle = won ? INK : PAPER; g.fillRect(px, py, pw, ph); g.strokeStyle = INK; g.lineWidth = 1.5; g.strokeRect(px, py, pw, ph);
-    g.fillStyle = won ? PAPER : INK; g.font = `700 ${10.5 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 20), px + 5 * sc, py + ph / 2 + 4 * sc);
+    g.fillStyle = won ? INK : PAPER; g.fillRect(px, py, pw, ph); g.strokeStyle = INK; g.lineWidth = 1.4; g.strokeRect(px, py, pw, ph);
+    g.fillStyle = won ? PAPER : INK; g.font = `700 ${11 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 22), px + 5 * sc, py + ph / 2 + 4 * sc);
     g.globalAlpha = 1;
-  }));
+  };
+  for (let c = 0; c < R; c++) {
+    const half = cols[c].length / 2, L = cols[c].slice(0, half), Rr = cols[c].slice(half);
+    for (let i = 0; i < ys[c].length; i++) { drawPill(L[i], leftX(c), ys[c][i]); drawPill(Rr[i], rightX(c), ys[c][i]); }
+  }
   g.fillStyle = INK; g.fillRect(48, S - 300, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 262);
   const nm = slice(champ.name, 16); g.font = '58px "Anton"';
   g.fillStyle = INK; g.fillText(nm, 56, S - 208);
@@ -674,7 +696,7 @@ const CSS = `
 @media(prefers-reduced-motion:reduce){.mb-panel,.mb-btn,.mb-gamecard,.mb-slot{transition:none}.mb-panel.win,.mb-panel.out,.mb-champ,.mb-nowcard.flash{animation:none}}
 `;
 
-function App() {
+export default function App() {
   const [links, setLinks] = useState("");
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
@@ -734,7 +756,7 @@ function App() {
   let body;
   if (screen === "connect") body = (
     <div className="mb-shell">
-      <div className="mb-kicker">pick a genre or paste albums · play four games</div>
+      <div className="mb-kicker">pick a genre or paste albums · play three games</div>
       <h1 className="mb-anton mb-hero"><span className="l1">Music</span> <span className="l2">Bracket</span></h1>
       <div style={{ height: 18 }} />
       <div className="mb-twocol">
@@ -811,15 +833,4 @@ function App() {
   else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
 
   return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
-}
-
-import { Analytics } from "@vercel/analytics/react";
-
-export default function MusicBracket() {
-  return (
-    <>
-      <App />
-      <Analytics />
-    </>
-  );
 }
