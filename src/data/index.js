@@ -17,3 +17,29 @@ export const GENRES = [modernIndie, indie2000s];
 export function genrePool(genre) {
   return genre.tracks.map((t, i) => ({ id: `${genre.genre}-${i}`, name: t.name, sub: t.sub, img: null }));
 }
+
+// Unique artists in a genre, each priced from genre.tiers (default £5).
+// Returns null-friendly data used by the Festival game.
+export function genreArtists(genre) {
+  const tiers = genre.tiers || {};
+  const seen = new Map();
+  genre.tracks.forEach((t) => { if (t.sub && !seen.has(t.sub)) seen.set(t.sub, { id: "fa-" + seen.size, name: t.sub, price: tiers[t.sub] || 5, img: null }); });
+  return [...seen.values()];
+}
+
+// Priced artists pooled across several genres (for the Festival game).
+// De-dupes by name; if an artist appears in two genres, the higher price wins.
+export function combinedArtists(genreList) {
+  const seen = new Map();
+  genreList.forEach((genre) => {
+    const tiers = genre.tiers || {};
+    genre.tracks.forEach((t) => {
+      if (!t.sub) return;
+      const price = tiers[t.sub] || 5;
+      if (!seen.has(t.sub) || price > seen.get(t.sub).price) {
+        seen.set(t.sub, { name: t.sub, price, img: null });
+      }
+    });
+  });
+  return [...seen.values()].map((a, i) => ({ id: "fa-" + i, ...a }));
+}

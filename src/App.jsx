@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { GENRES, genrePool } from "./data/index.js";
+import { GENRES, genrePool, genreArtists, combinedArtists } from "./data/index.js";
 
 /* ================================================================== *
  * Music Bracket
@@ -33,6 +33,15 @@ function shuffleTake(arr, k) {
   const idx = arr.map((_, i) => i);
   for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
   return idx.slice(0, k).map((i) => arr[i]);
+}
+// Random draw of n items with at most maxPer per artist; falls back to fill
+// if the cap can't reach n (e.g. a single-artist album pool).
+function drawCapped(pool, n, maxPer = 3) {
+  const shuffled = shuffleTake(pool, pool.length);
+  const counts = {}, out = [];
+  for (const t of shuffled) { const a = t.sub || t.name; if ((counts[a] || 0) < maxPer) { counts[a] = (counts[a] || 0) + 1; out.push(t); if (out.length === n) return out; } }
+  for (const t of shuffled) { if (!out.includes(t)) { out.push(t); if (out.length === n) break; } }
+  return out;
 }
 function downloadURL(url, name) { if (!url) return; const a = document.createElement("a"); a.href = url; a.download = name; a.click(); }
 // Collapse a track pool down to its unique artists (uses each track's `sub`).
@@ -118,9 +127,9 @@ function buildColumns(rounds, seeded, geo) {
   if (cur) { const p = cols[cur.r]; if (p[cur.m * 2]) p[cur.m * 2].cur = true; if (p[cur.m * 2 + 1]) p[cur.m * 2 + 1].cur = true; }
   return cols;
 }
-function makeBracket(pool) {
-  const n = pool.length >= 16 ? 16 : pool.length >= 8 ? 8 : 0; if (!n) return null;
-  const picked = shuffleTake(pool, n);
+function makeBracket(pool, size) {
+  const n = size || (pool.length >= 16 ? 16 : pool.length >= 8 ? 8 : 0); if (!n) return null;
+  const picked = drawCapped(pool, n, 3);
   const order = seedOrder(n).map((s) => picked[s - 1]);
   const rounds = []; let mc = n / 2; const first = [];
   for (let i = 0; i < mc; i++) first.push({ a: order[i * 2], b: order[i * 2 + 1], winner: null });
@@ -186,20 +195,20 @@ async function bracketImage(rounds, seeded, champ, meta) {
   }));
   g.fillStyle = INK; g.fillRect(48, S - 300, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 262);
   const nm = slice(champ.name, 16); g.font = '58px "Anton"';
-  g.fillStyle = BLUE; g.fillText(nm, 60, S - 206); g.fillStyle = RED; g.fillText(nm, 56, S - 210); g.fillStyle = INK; g.fillText(nm, 58, S - 208);
+  g.fillStyle = INK; g.fillText(nm, 56, S - 208);
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
 function Bracket({ pool, label, onHome }) {
-  const [b, setB] = useState(() => makeBracket(pool));
-  const [rounds, setRounds] = useState(b.rounds);
-  const [seeded, setSeeded] = useState(b.seeded);
+  const sizes = useMemo(() => [8, 16, 32].filter((s) => pool.length >= s), [pool]);
+  const [size, setSize] = useState(null);
+  const [rounds, setRounds] = useState(null);
+  const [seeded, setSeeded] = useState(null);
   const [anim, setAnim] = useState(null);
   const [champ, setChamp] = useState(null);
   const [img, setImg] = useState(null);
-  const cur = currentMatch(rounds);
-  const total = seeded.length - 1;
-  const done = useMemo(() => rounds.reduce((s, rd) => s + rd.filter((m) => m.winner).length, 0), [rounds]);
+  const start = (s) => { const nb = makeBracket(pool, s); setSize(s); setRounds(nb.rounds); setSeeded(nb.seeded); setChamp(null); setImg(null); };
+  useEffect(() => { if (sizes.length === 1) start(sizes[0]); /* eslint-disable-next-line */ }, []);
   const pick = (top) => {
     if (anim || !cur) return; const mt = rounds[cur.r][cur.m], w = top ? mt.a : mt.b; setAnim(top ? "t" : "b");
     setTimeout(async () => {
@@ -210,7 +219,22 @@ function Bracket({ pool, label, onHome }) {
       if (fin) { setChamp(fin); try { setImg(await bracketImage(nx, seeded, fin, label)); } catch (e) {} }
     }, 320);
   };
-  const again = () => { const nb = makeBracket(pool); setB(nb); setRounds(nb.rounds); setSeeded(nb.seeded); setChamp(null); setImg(null); };
+  const again = () => start(size);
+
+  // size chooser (only when more than one size is possible and none picked yet)
+  if (!rounds || !seeded) return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Bracket size</div><div className="mb-round mb-mono">{slice(label, 22)}</div></div>
+      <p className="mb-note mb-mono">How many go into the draw?</p>
+      <div className="mb-sizegrid">
+        {sizes.map((s) => <button key={s} className="mb-sizebtn mb-anton" onClick={() => start(s)}>{s}</button>)}
+      </div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={onHome}>‹ Menu</button></div>
+    </div>
+  );
+  const cur = currentMatch(rounds);
+  const total = seeded.length - 1;
+  const done = rounds.reduce((s, rd) => s + rd.filter((m) => m.winner).length, 0);
   if (champ) return (
     <div className="mb-shell">
       <div className="mb-champ"><div className="eyebrow mb-mono">Tonight's headliner</div><h1 className="mb-anton headliner">{champ.name}</h1>{champ.sub && <div className="csub">{champ.sub}</div>}</div>
@@ -256,7 +280,7 @@ async function blindImage(slots, label) {
   return cv.toDataURL("image/png");
 }
 function BlindRank({ pool, label, onHome }) {
-  const [five, setFive] = useState(() => shuffleTake(pool, 5));
+  const [five, setFive] = useState(() => drawCapped(pool, 5, 3));
   const [slots, setSlots] = useState([null, null, null, null, null]);
   const [idx, setIdx] = useState(0);
   const [img, setImg] = useState(null);
@@ -268,7 +292,7 @@ function BlindRank({ pool, label, onHome }) {
     const ns = [...slots]; ns[s] = five[idx]; setSlots(ns); setIdx(idx + 1);
     setFlash(true); setTimeout(() => setFlash(false), 260);
   };
-  const reset = () => { setFive(shuffleTake(pool, 5)); setSlots([null, null, null, null, null]); setIdx(0); setImg(null); };
+  const reset = () => { setFive(drawCapped(pool, 5, 3)); setSlots([null, null, null, null, null]); setIdx(0); setImg(null); };
   const cur = !done ? five[idx] : null;
   return (
     <div className="mb-shell">
@@ -329,7 +353,7 @@ async function tierImage(items, placements, label) {
   return cv.toDataURL("image/png");
 }
 function TierList({ pool, label, onHome }) {
-  const items = useMemo(() => shuffleTake(pool, Math.min(18, pool.length)), [pool]);
+  const items = useMemo(() => drawCapped(pool, Math.min(18, pool.length), 3), [pool]);
   const [placements, setPlacements] = useState({});
   const [sel, setSel] = useState(null);
   const [finished, setFinished] = useState(false);
@@ -361,6 +385,147 @@ function TierList({ pool, label, onHome }) {
   );
 }
 
+// ================= GAME 4: Festival Lineup =================
+const BUDGETS = [50, 100, 150];
+const DAY_NAMES = ["Friday", "Saturday", "Sunday"];
+async function festivalImage(byDay, days, budget, label) {
+  await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
+  posterChrome(g, S, "MY FESTIVAL", label);
+  const colW = (S - 112) / days, x0 = 56;
+  const top = 210, bottom = S - 250;
+  for (let d = 0; d < days; d++) {
+    const cx = x0 + colW * d + colW / 2;
+    const acts = [...byDay[d]].sort((a, b) => b.price - a.price);
+    // day divider
+    if (d > 0) { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.moveTo(x0 + colW * d, top - 4); g.lineTo(x0 + colW * d, bottom); g.stroke(); }
+    g.textAlign = "center"; g.fillStyle = INK;
+    g.font = '20px "Space Mono"'; g.fillText(DAY_NAMES[d].toUpperCase(), cx, top);
+    let y = top + 46;
+    acts.forEach((a, i) => {
+      const size = i === 0 ? Math.min(34, (colW - 20) / 4) : i < 3 ? 20 : 15;
+      g.font = `${size}px "Anton"`;
+      const nm = i === 0 ? a.name.toUpperCase() : a.name;
+      const maxc = Math.floor((colW - 16) / (size * 0.5));
+      g.fillText(slice(nm, Math.max(8, maxc)), cx, y);
+      y += size + 10;
+    });
+  }
+  g.textAlign = "left"; g.fillStyle = INK; g.font = '18px "Space Mono"'; g.globalAlpha = .7;
+  const total = byDay.flat().length;
+  g.fillText(`${days} day${days > 1 ? "s" : ""} · ${total} acts · £${budget} budget`, 56, S - 236); g.globalAlpha = 1;
+  await drawFooterQR(g, S);
+  return cv.toDataURL("image/png");
+}
+function Festival({ pools, label, onHome }) {
+  // pools: { all: [...], byGenre: { "Modern Indie": [...], "2000s Indie": [...] } }
+  const eras = ["All", ...Object.keys(pools.byGenre)];
+  const [era, setEra] = useState("All");
+  const artists = era === "All" ? pools.all : pools.byGenre[era];
+  const [days, setDays] = useState(null);
+  const [budget, setBudget] = useState(null);
+  const [placement, setPlacement] = useState({});   // artistId -> day index
+  const [assigning, setAssigning] = useState(null);  // artist awaiting a day choice
+  const [done, setDone] = useState(false);
+  const [img, setImg] = useState(null);
+
+  const chosen = artists.filter((a) => placement[a.id] != null);
+  const spent = chosen.reduce((s, a) => s + a.price, 0);
+  const remaining = (budget || 0) - spent;
+  const byDay = Array.from({ length: days || 0 }, (_, d) => artists.filter((a) => placement[a.id] === d));
+
+  const changeEra = (e) => { setEra(e); setPlacement({}); setAssigning(null); };
+  const onChipTap = (a) => {
+    if (placement[a.id] != null) { const p = { ...placement }; delete p[a.id]; setPlacement(p); return; }
+    if (a.price > remaining) return;
+    if (days === 1) { setPlacement({ ...placement, [a.id]: 0 }); return; }
+    setAssigning(a);
+  };
+  const assignDay = (d) => { setPlacement({ ...placement, [assigning.id]: d }); setAssigning(null); };
+  const finish = async () => { setDone(true); try { setImg(await festivalImage(byDay, days, budget, era === "All" ? label : era)); } catch (e) {} };
+
+  // 1. days
+  if (!days) return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Festival Lineup</div><div className="mb-round mb-mono">{artists.length} acts</div></div>
+      <div className="mb-rankby mb-mono">Line-up pool</div>
+      <div className="mb-toggle">
+        {eras.map((e) => <button key={e} className={era === e ? "on" : ""} onClick={() => changeEra(e)}>{e === "All" ? "All" : e.replace(" Indie", "")}</button>)}
+      </div>
+      <p className="mb-note mb-mono">How many days is your festival?</p>
+      <div className="mb-sizegrid">{[1, 2, 3].map((n) => <button key={n} className="mb-sizebtn mb-anton" onClick={() => setDays(n)}>{n}</button>)}</div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={onHome}>‹ Menu</button></div>
+    </div>
+  );
+  // 2. budget
+  if (!budget) return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Festival Lineup</div><div className="mb-round mb-mono">{days} day{days > 1 ? "s" : ""}</div></div>
+      <p className="mb-note mb-mono">Pick your total budget — spend it across the {days === 1 ? "day" : days + " days"} however you like.</p>
+      <div className="mb-sizegrid">{BUDGETS.map((b) => <button key={b} className="mb-sizebtn mb-anton" style={{ fontSize: 26 }} onClick={() => setBudget(b * days)}>£{b * days}</button>)}</div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setDays(null)}>‹ Back</button></div>
+    </div>
+  );
+  // done
+  if (done) return (
+    <div className="mb-shell">
+      <div className="mb-champ"><div className="eyebrow mb-mono">The bill</div><h1 className="mb-anton" style={{ fontSize: "clamp(32px,9vw,64px)", lineHeight: .9, margin: "8px 0" }}>My Festival</h1><div className="csub">{chosen.length} acts · {days} day{days > 1 ? "s" : ""} · £{spent} spent</div></div>
+      {img ? <img className="mb-shareimg" src={img} alt="Festival lineup" style={{ width: 400 }} /> : <p className="mb-mono" style={{ textAlign: "center" }}>Rendering…</p>}
+      <div className="mb-actions">
+        <button className="mb-btn" onClick={() => shareURL(img, "festival.png", `My festival lineup\n\nBuild yours at https://${SITE_URL} ${HANDLE}`)}>Share</button>
+        <button className="mb-btn ghost" onClick={() => downloadURL(img, "festival.png")}>Save</button>
+        <button className="mb-btn ghost" onClick={() => setDone(false)}>Edit</button>
+        <button className="mb-btn ghost" onClick={onHome}>Menu</button>
+      </div>
+    </div>
+  );
+  // day-picker overlay
+  if (assigning) return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Add to…</div><div className="mb-round mb-mono">{slice(assigning.name, 20)}<br />£{assigning.price}</div></div>
+      <p className="mb-note mb-mono">Which day does {assigning.name} play?</p>
+      <div className="mb-sizegrid">{Array.from({ length: days }, (_, d) => (
+        <button key={d} className="mb-sizebtn mb-anton" style={{ fontSize: 18 }} onClick={() => assignDay(d)}>{DAY_NAMES[d]}<br /><span style={{ fontSize: 12 }}>{byDay[d].length} acts</span></button>
+      ))}</div>
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setAssigning(null)}>Cancel</button></div>
+    </div>
+  );
+  // 3. builder
+  const byTier = [25, 20, 15, 10, 5].map((p) => ({ p, list: artists.filter((a) => a.price === p) })).filter((t) => t.list.length);
+  const pct = budget ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+  return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Festival Lineup</div><div className="mb-round mb-mono">£{spent} / £{budget}<br />£{remaining} left</div></div>
+      <div className="mb-progress"><span style={{ width: pct + "%", background: remaining < 0 ? RED : INK }} /></div>
+      {days > 1 && (
+        <div className="mb-daystrip">
+          {byDay.map((acts, d) => (
+            <div key={d} className="mb-daycol">
+              <div className="mb-dayhead mb-mono">{DAY_NAMES[d]}</div>
+              {acts.length ? acts.slice().sort((a, b) => b.price - a.price).map((a) => <div key={a.id} className="mb-dayact" onClick={() => onChipTap(a)}>{slice(a.name, 16)}</div>) : <div className="mb-dayempty mb-mono">empty</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {byTier.map((t) => (
+        <div key={t.p} className="mb-fest-tier">
+          <div className="mb-fest-price mb-anton">£{t.p}</div>
+          <div className="mb-fest-grid">
+            {t.list.map((a) => {
+              const on = placement[a.id] != null; const afford = on || a.price <= remaining;
+              return <button key={a.id} className={"mb-fest-chip" + (on ? " on" : "") + (afford ? "" : " cant")} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="mb-actions">
+        <button className="mb-btn" onClick={finish} disabled={!chosen.length}>Finish lineup</button>
+        <button className="mb-btn ghost" onClick={() => { setDays(null); setBudget(null); setPlacement({}); }}>Restart</button>
+        <button className="mb-btn ghost" onClick={onHome}>Menu</button>
+      </div>
+    </div>
+  );
+}
+
 // ================= APP =================
 const GAMES = [
   { k: "bracket", t: "Bracket Battles", d: "16 go in, one comes out. Knockout picks with a live draw.", min: 8 },
@@ -376,7 +541,7 @@ const CSS = `
 .mb-anton{font-family:'Anton',sans-serif;letter-spacing:.01em;text-transform:uppercase}
 .mb-mono{font-family:'Space Mono',monospace}
 .mb-bill{border:3px solid var(--ink);background:var(--paper);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;box-shadow:5px 5px 0 var(--ink);margin-bottom:16px;gap:10px}
-.mb-title{font-size:20px;line-height:.9}.mb-round{font-size:11px;letter-spacing:.1em;text-transform:uppercase;text-align:right;line-height:1.3}
+.mb-title{font-size:20px;line-height:.9;color:var(--ink)}.mb-round{font-size:11px;letter-spacing:.1em;text-transform:uppercase;text-align:right;line-height:1.3;color:var(--ink)}
 .mb-progress{height:6px;background:rgba(23,20,15,.15);margin:12px 0 18px}.mb-progress>span{display:block;height:100%;background:var(--ink);transition:width .35s ease}
 .mb-vs-wrap{position:relative}
 .mb-panel{position:relative;width:100%;border:3px solid var(--ink);background:var(--paper);cursor:pointer;overflow:hidden;box-shadow:6px 6px 0 var(--ink);transition:transform .12s,box-shadow .12s;display:grid;grid-template-columns:92px 1fr;text-align:left}
@@ -400,7 +565,7 @@ const CSS = `
 .mb-hero{font-size:clamp(44px,13vw,92px);line-height:.82;text-align:center}.mb-hero .l1{color:var(--ink)}.mb-hero .l2{color:var(--red);text-shadow:3px 3px 0 var(--blue)}
 .mb-kicker{font-size:13px;letter-spacing:.24em;text-transform:uppercase;opacity:.75;margin-bottom:20px;text-align:center}
 .mb-card{border:3px solid var(--ink);background:var(--paper);box-shadow:6px 6px 0 var(--ink);padding:18px;text-align:left;margin:14px 0}
-.mb-card h2{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin:0 0 4px}.mb-card p{margin:0 0 12px;font-size:14px;line-height:1.45}
+.mb-card h2{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin:0 0 4px;color:var(--ink)}.mb-card p{margin:0 0 12px;font-size:14px;line-height:1.45;color:var(--ink)}
 .mb-gamecard{cursor:pointer;transition:transform .1s,box-shadow .1s}.mb-gamecard:hover{transform:translate(-2px,-2px);box-shadow:9px 9px 0 var(--ink)}
 .mb-gamecard.off{opacity:.45;cursor:not-allowed;box-shadow:3px 3px 0 var(--ink)}
 .mb-twocol{display:grid;grid-template-columns:1fr;gap:14px}
@@ -409,6 +574,24 @@ const CSS = `
 .mb-genregrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mb-toggle{display:flex;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);margin:0 0 18px;background:var(--paper)}
 .mb-rankby{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.65;margin:2px 2px 6px}
+.mb-sizegrid{display:flex;gap:12px;justify-content:center;margin:10px 0 20px}
+.mb-fest-tier{display:flex;gap:12px;border:3px solid var(--ink);border-bottom:none;padding:10px;align-items:flex-start}
+.mb-fest-tier:last-of-type{border-bottom:3px solid var(--ink)}
+.mb-fest-price{flex:0 0 52px;font-size:22px;color:var(--ink);padding-top:4px}
+.mb-fest-grid{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.mb-fest-chip{font-family:'Space Grotesk';font-size:13px;font-weight:600;color:var(--ink);background:var(--paper);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);padding:6px 10px;cursor:pointer}
+.mb-fest-chip.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--red)}
+.mb-fest-chip.cant{opacity:.3;cursor:not-allowed}
+.mb-fest-chip b{color:var(--red)}.mb-fest-chip.on b{color:var(--paper)}
+.mb-daystrip{display:flex;gap:8px;margin-bottom:16px}
+.mb-daycol{flex:1;border:3px solid var(--ink);background:var(--paper);box-shadow:3px 3px 0 var(--ink);min-height:70px;padding:6px}
+.mb-dayhead{font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-align:center;border-bottom:2px solid var(--ink);padding-bottom:4px;margin-bottom:4px;color:var(--ink)}
+.mb-dayact{font-family:'Space Grotesk';font-size:11px;font-weight:600;color:var(--ink);padding:2px 3px;cursor:pointer;border-bottom:1px dashed rgba(23,20,15,.2)}
+.mb-dayact:hover{color:var(--red)}
+.mb-dayempty{font-size:11px;opacity:.4;text-align:center;padding-top:8px}
+.mb-sizebtn{flex:1;max-width:140px;font-size:34px;padding:24px 0;border:3px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;box-shadow:5px 5px 0 var(--ink);transition:transform .1s,box-shadow .1s}
+.mb-sizebtn:hover{transform:translate(-2px,-2px);box-shadow:8px 8px 0 var(--ink)}
+.mb-sizebtn:active{transform:translate(2px,2px);box-shadow:none;background:var(--ink);color:var(--paper)}
 .mb-credit{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:26px;font-size:13px;font-family:'Space Mono',monospace;opacity:.85}
 .mb-credit b{font-family:'Anton',sans-serif;letter-spacing:.03em}
 .mb-credit-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--red);color:var(--paper);font-size:15px}
@@ -451,6 +634,7 @@ export default function App() {
   const [links, setLinks] = useState("");
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
+  const [genreObj, setGenreObj] = useState(null);
   const [screen, setScreen] = useState("connect");   // connect | genres | menu | <game>
   const [unit, setUnit] = useState("tracks");         // tracks | artists
   const [loading, setLoading] = useState(false);
@@ -459,7 +643,7 @@ export default function App() {
   useEffect(() => { if (styled.current) return; styled.current = true; const el = document.createElement("style"); el.textContent = CSS; document.head.appendChild(el); }, []);
 
   // ---- A. genre (local, no API) ----
-  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setUnit("tracks"); setScreen("menu"); };
+  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setGenreObj(g); setUnit("tracks"); setScreen("menu"); };
 
   // ---- B. one or more album links (live) ----
   const loadAlbums = useCallback(async () => {
@@ -492,6 +676,7 @@ export default function App() {
       if (items.length < 5) throw new Error(failed ? "Couldn't load enough tracks — some albums may be unavailable." : "Fewer than 5 tracks total — add another album.");
       setPool(items);
       setPoolLabel(names.length === 1 ? names[0] : `${names.length} albums`);
+      setGenreObj(null);
       setUnit("tracks");
       setScreen("menu");
       if (failed) setError(`Loaded ${names.length} — ${failed} link${failed > 1 ? "s" : ""} couldn't be read and ${failed > 1 ? "were" : "was"} skipped.`);
@@ -566,6 +751,12 @@ export default function App() {
             </div>
           );
         })}
+        {genreObj && (
+          <div className="mb-card mb-gamecard" onClick={() => setScreen("festival")}>
+            <h2>Festival Lineup</h2>
+            <p style={{ margin: 0 }}>Build a festival bill on a budget — bigger acts cost more.</p>
+          </div>
+        )}
         <div className="mb-actions"><button className="mb-btn ghost" onClick={() => { setError(""); setScreen("connect"); }}>‹ Change source</button></div>
       </div>
     );
@@ -573,6 +764,7 @@ export default function App() {
   else if (screen === "bracket") body = <Bracket key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
   else if (screen === "blind") body = <BlindRank key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
   else if (screen === "tier") body = <TierList key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
+  else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
 
   return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
 }
