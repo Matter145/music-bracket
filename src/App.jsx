@@ -3,7 +3,7 @@ import { GENRES, genrePool, genreArtists, combinedArtists } from "./data/index.j
 
 /* ================================================================== *
  * Music Bracket
- * Two ways to play three games (Bracket · Blind Rank · Tier List):
+ * Two ways to play four games (Bracket · Blind Rank · Tier List · Festival lineup):
  *   A) Pick a genre  → built-in local song database, no API, instant
  *   B) Paste albums  → one or more Spotify album links, fetched live
  * The genre database is the driver; albums are the personal layer.
@@ -734,7 +734,7 @@ export default function App() {
   let body;
   if (screen === "connect") body = (
     <div className="mb-shell">
-      <div className="mb-kicker">pick a genre or paste albums · play three games</div>
+      <div className="mb-kicker">pick a genre or paste albums · play four games</div>
       <h1 className="mb-anton mb-hero"><span className="l1">Music</span> <span className="l2">Bracket</span></h1>
       <div style={{ height: 18 }} />
       <div className="mb-twocol">
@@ -811,4 +811,15 @@ export default function App() {
   else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
 
   return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
+}
+
+import { Analytics } from "@vercel/analytics/react";
+
+export default function App() {
+  return (
+    <>
+      {/* Your existing components */}
+      <Analytics />
+    </>
+  );
 }
