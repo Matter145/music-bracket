@@ -387,10 +387,12 @@ function TierList({ pool, label, onHome }) {
 
 // ================= GAME 4: Festival Lineup =================
 const BUDGETS = [50, 75, 100];
-const DAY_NAMES = ["Friday", "Saturday", "Sunday"];
+const DAY_SETS = { 1: ["Saturday"], 2: ["Saturday", "Sunday"], 3: ["Friday", "Saturday", "Sunday"] };
+const dayNames = (n) => DAY_SETS[n] || ["Friday", "Saturday", "Sunday"].slice(0, n);
 async function festivalImage(byDay, days, budget, spent, meta) {
   await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
   posterChrome(g, S, "MY FESTIVAL", meta);
+  const DN = dayNames(days);
   const x0 = 56, regRight = S - 56, colW = (regRight - x0) / days;
   const lineGap = 16, headerH = 44;
   // build each day's lines with font sizes
@@ -408,7 +410,7 @@ async function festivalImage(byDay, days, budget, spent, meta) {
   for (let d = 0; d < days; d++) {
     const cx = x0 + colW * d + colW / 2;
     if (d > 0) { g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.moveTo(x0 + colW * d, blockTop - 8); g.lineTo(x0 + colW * d, dividerBottom); g.stroke(); }
-    g.fillStyle = INK; g.font = '20px "Space Mono"'; g.fillText(DAY_NAMES[d].toUpperCase(), cx, blockTop + 18);
+    g.fillStyle = INK; g.font = '20px "Space Mono"'; g.fillText(DN[d].toUpperCase(), cx, blockTop + 18);
     let y = blockTop + headerH + 26;
     dayBlocks[d].forEach((l) => {
       g.font = `${l.size}px "Anton"`;
@@ -441,6 +443,7 @@ function Festival({ pools, label, onHome }) {
   const remaining = (budget || 0) - spent;
   const selCount = Object.keys(selected).length;
   const byDay = Array.from({ length: days || 0 }, (_, d) => artists.filter((a) => placement[a.id] === d));
+  const DN = days ? dayNames(days) : [];
 
   const changeEra = (e) => { setEra(e); setPlacement({}); setSelected({}); };
   // Tap an artist: placed → remove it; unplaced → toggle in the staged selection (budget-blocked).
@@ -506,7 +509,7 @@ function Festival({ pools, label, onHome }) {
         <div className="mb-daystrip">
           {byDay.map((acts, d) => (
             <div key={d} className="mb-daycol">
-              <div className="mb-dayhead mb-mono">{DAY_NAMES[d]}</div>
+              <div className="mb-dayhead mb-mono">{DN[d]}</div>
               {acts.length ? acts.slice().sort((a, b) => b.price - a.price).map((a) => <div key={a.id} className="mb-dayact" onClick={() => onChipTap(a)}>{slice(a.name, 16)}</div>) : <div className="mb-dayempty mb-mono">empty</div>}
             </div>
           ))}
@@ -528,7 +531,7 @@ function Festival({ pools, label, onHome }) {
                   const sel = !!selected[a.id];
                   const afford = on || sel || (stagedCost + a.price <= remaining);
                   const cls = "mb-fest-chip" + (on ? " on" : sel ? " sel" : "") + (afford ? "" : " cant");
-                  return <button key={a.id} className={cls} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DAY_NAMES[placement[a.id]][0]}</b> : null}</button>;
+                  return <button key={a.id} className={cls} onClick={() => onChipTap(a)}>{a.name}{on && days > 1 ? <b> · {DN[placement[a.id]][0]}</b> : null}</button>;
                 })}
               </div>
             )}
@@ -545,7 +548,7 @@ function Festival({ pools, label, onHome }) {
           <div className="mb-daybar-label mb-mono">{selCount ? `${selCount} selected · £${stagedCost} → add to` : "tap acts, then a day"}</div>
           <div className="mb-daybar-btns">
             {Array.from({ length: days }, (_, d) => (
-              <button key={d} className="mb-daybar-btn mb-anton" disabled={!selCount} onClick={() => placeSelectedOn(d)}>{DAY_NAMES[d].slice(0, 3)}<span className="mb-mono">{byDay[d].length}</span></button>
+              <button key={d} className="mb-daybar-btn mb-anton" disabled={!selCount} onClick={() => placeSelectedOn(d)}>{DN[d].slice(0, 3)}<span className="mb-mono">{byDay[d].length}</span></button>
             ))}
           </div>
         </div>
