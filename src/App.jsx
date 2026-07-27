@@ -174,50 +174,56 @@ function BracketMap({ rounds, seeded }) {
     </svg>
   );
 }
-async function bracketImage(rounds, seeded, champ, meta) {
+async function bracketImage(rounds, seeded, champ, meta, cropFrom = 0) {
   await loadFonts(); const S = 1080, cv = document.createElement("canvas"); cv.width = S; cv.height = S; const g = cv.getContext("2d");
-  posterChrome(g, S, "BRACKET BATTLES", meta);
-  const R = rounds.length, n = rounds[0].length * 2;
-  const geo = computeGeometry(rounds), cols = buildColumns(rounds, seeded, geo);
-  // mirrored bracket-space geometry: left half flows right, right half flows left, meeting centre
-  const PW = 150, PH = 30, COL = 168, ROW = 38, TOPB = 10, GAP = 92;
-  const Wb = 2 * (R - 1) * COL + 2 * PW + GAP, Hb = (n / 2) * ROW + 2 * TOPB;
-  const regX = 40, regY = 168, regW = S - 80, regH = 578;
-  const sc = Math.min(regW / Wb, regH / Hb), ox = regX + (regW - Wb * sc) / 2, oy = regY + (regH - Hb * sc) / 2;
-  const X = (v) => ox + v * sc, Y = (v) => oy + v * sc;
-  // per-side vertical centres for each column
-  const ys = [[]]; for (let i = 0; i < n / 2; i++) ys[0].push(TOPB + i * ROW + ROW / 2);
-  for (let c = 1; c < R; c++) { ys[c] = []; for (let i = 0; i < ys[c - 1].length / 2; i++) ys[c].push((ys[c - 1][2 * i] + ys[c - 1][2 * i + 1]) / 2); }
-  const leftX = (c) => c * COL, rightX = (c) => Wb - PW - c * COL;
-  // connectors (both sides)
-  g.strokeStyle = INK; g.lineWidth = 1.5; g.globalAlpha = .5;
-  for (let c = 0; c < R - 1; c++) for (let i = 0; i < ys[c + 1].length; i++) {
-    const yA = ys[c][2 * i], yB = ys[c][2 * i + 1], yT = ys[c + 1][i];
-    let x1 = leftX(c) + PW, x2 = leftX(c + 1), xm = (x1 + x2) / 2;
-    g.beginPath(); g.moveTo(X(x1), Y(yA)); g.lineTo(X(xm), Y(yA)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(x1), Y(yB)); g.lineTo(X(xm), Y(yB)); g.lineTo(X(xm), Y(yT)); g.lineTo(X(x2), Y(yT)); g.stroke();
-    x1 = rightX(c); x2 = rightX(c + 1) + PW; xm = (x1 + x2) / 2;
-    g.beginPath(); g.moveTo(X(x1), Y(yA)); g.lineTo(X(xm), Y(yA)); g.lineTo(X(xm), Y(yT)); g.moveTo(X(x1), Y(yB)); g.lineTo(X(xm), Y(yB)); g.lineTo(X(xm), Y(yT)); g.lineTo(X(x2), Y(yT)); g.stroke();
-  }
-  // centre: finalists converge on a diamond node
-  const yc = ys[R - 1][0], cX = Wb / 2;
-  g.beginPath(); g.moveTo(X(leftX(R - 1) + PW), Y(yc)); g.lineTo(X(cX), Y(yc)); g.moveTo(X(rightX(R - 1)), Y(yc)); g.lineTo(X(cX), Y(yc)); g.stroke(); g.globalAlpha = 1;
-  const dsz = 7 * sc; g.fillStyle = INK; g.beginPath(); g.moveTo(X(cX), Y(yc) - dsz); g.lineTo(X(cX) + dsz, Y(yc)); g.lineTo(X(cX), Y(yc) + dsz); g.lineTo(X(cX) - dsz, Y(yc)); g.closePath(); g.fill();
-  // pills (split each column into left half + right half)
-  const drawPill = (p, bx, by) => {
+  const allCols = buildColumns(rounds, seeded, computeGeometry(rounds));
+  const fullN = allCols[0].length;
+  const cols = allCols.slice(cropFrom);          // view columns: cols[0]=entrants at this depth, last=champion
+  const suffix = fullN === 32 ? (cropFrom > 0 ? "FINAL 16" : "FULL 32") : "";
+  posterChrome(g, S, "BRACKET BATTLES", suffix ? `${meta} \u00b7 ${suffix}` : meta);
+  // Mirrored, full-height layout: left half flows in from the left, right half from the right,
+  // finalists meet at a centre node; champion is the bottom headline. Winner=filled, loser=outline+dim.
+  const R = cols.length - 1, n = cols[0].length;
+  const regX = 44, regY = 162, regW = S - 88, regH = 600;
+  const sideCols = R, centerGap = 14;
+  const colStep = (regW / 2 - centerGap) / sideCols;
+  const pillW = colStep - 6;
+  const pillH = Math.min(30, regH / (n / 2) - 4);
+  const FS = Math.max(8, Math.min(12, pillH * 0.42));
+  const yPos = (j, m) => regY + regH * (j + 0.5) / m;
+  const LX = (c) => regX + c * colStep, RX = (c) => regX + regW - c * colStep - pillW;
+  const drawPill = (p, x, y) => {
     if (!p || p.state === "empty") return;
-    const px = X(bx), py = Y(by - PH / 2), pw = PW * sc, ph = PH * sc, won = p.state === "win" || p.state === "champ";
-    g.globalAlpha = p.state === "lose" ? .45 : 1;
-    g.fillStyle = won ? INK : PAPER; g.fillRect(px, py, pw, ph); g.strokeStyle = INK; g.lineWidth = 1.4; g.strokeRect(px, py, pw, ph);
-    g.fillStyle = won ? PAPER : INK; g.font = `700 ${11 * sc}px "Space Grotesk"`; g.fillText(slice(p.e.name, 22), px + 5 * sc, py + ph / 2 + 4 * sc);
+    const won = p.state === "win" || p.state === "champ";
+    g.globalAlpha = p.state === "lose" ? .5 : 1;
+    g.fillStyle = won ? INK : PAPER; g.fillRect(x, y - pillH / 2, pillW, pillH);
+    g.strokeStyle = INK; g.lineWidth = 1.2; g.strokeRect(x, y - pillH / 2, pillW, pillH);
+    g.fillStyle = won ? PAPER : INK; g.font = `700 ${FS}px "Space Grotesk"`;
+    const maxc = Math.max(6, Math.floor((pillW - 8) / (FS * 0.5)));
+    g.fillText(slice(p.e.name, maxc), x + 5, y + FS * 0.35);
     g.globalAlpha = 1;
   };
-  for (let c = 0; c < R; c++) {
-    const half = cols[c].length / 2, L = cols[c].slice(0, half), Rr = cols[c].slice(half);
-    for (let i = 0; i < ys[c].length; i++) { drawPill(L[i], leftX(c), ys[c][i]); drawPill(Rr[i], rightX(c), ys[c][i]); }
+  for (const side of [-1, 1]) {
+    const XX = side < 0 ? LX : RX;
+    for (let c = 0; c < sideCols; c++) {
+      const m = cols[c].length / 2, base = side < 0 ? 0 : m;
+      if (c < sideCols - 1) {
+        g.strokeStyle = INK; g.lineWidth = 1.2; g.globalAlpha = .5;
+        for (let p = 0; p < m / 2; p++) {
+          const y0 = yPos(2 * p, m), y1 = yPos(2 * p + 1, m), yp = yPos(p, m / 2);
+          const ce = side < 0 ? XX(c) + pillW : XX(c), pe = side < 0 ? XX(c + 1) : XX(c + 1) + pillW, mx = (ce + pe) / 2;
+          g.beginPath(); g.moveTo(ce, y0); g.lineTo(mx, y0); g.moveTo(ce, y1); g.lineTo(mx, y1); g.moveTo(mx, y0); g.lineTo(mx, y1); g.moveTo(mx, yp); g.lineTo(pe, yp); g.stroke();
+        }
+        g.globalAlpha = 1;
+      }
+      for (let k = 0; k < m; k++) drawPill(cols[c][base + k], XX(c), yPos(k, m));
+    }
   }
-  g.fillStyle = INK; g.fillRect(48, S - 300, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 262);
-  const nm = slice(champ.name, 16); g.font = '58px "Anton"';
-  g.fillStyle = INK; g.fillText(nm, 56, S - 208);
+  const yc = yPos(0, 1), lend = LX(sideCols - 1) + pillW, rend = RX(sideCols - 1);
+  g.globalAlpha = .5; g.strokeStyle = INK; g.lineWidth = 1.2; g.beginPath(); g.moveTo(lend, yc); g.lineTo(rend, yc); g.stroke(); g.globalAlpha = 1;
+  const cX = S / 2, d = 6; g.fillStyle = INK; g.beginPath(); g.moveTo(cX, yc - d); g.lineTo(cX + d, yc); g.lineTo(cX, yc + d); g.lineTo(cX - d, yc); g.closePath(); g.fill();
+  g.fillStyle = INK; g.fillRect(48, S - 250, S - 96, 4); g.font = '22px "Space Mono"'; g.fillText("CHAMPION", 56, S - 214);
+  const nm = slice(champ.name, 20); g.font = '54px "Anton"'; g.fillStyle = INK; g.fillText(nm, 56, S - 160);
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
@@ -229,16 +235,25 @@ function Bracket({ pool, label, onHome }) {
   const [anim, setAnim] = useState(null);
   const [champ, setChamp] = useState(null);
   const [img, setImg] = useState(null);
-  const start = (s) => { const nb = makeBracket(pool, s); setSize(s); setRounds(nb.rounds); setSeeded(nb.seeded); setChamp(null); setImg(null); };
+  const [view, setView] = useState("final16");   // 32-brackets: "final16" | "full32"
+  const start = (s) => { const nb = makeBracket(pool, s); setSize(s); setRounds(nb.rounds); setSeeded(nb.seeded); setChamp(null); setImg(null); setView("final16"); };
   useEffect(() => { if (sizes.length === 1) start(sizes[0]); /* eslint-disable-next-line */ }, []);
+  // (re)render the share poster whenever a champion is crowned or the crop view changes
+  useEffect(() => {
+    if (!champ) return; let alive = true;
+    const cropFrom = (size === 32 && view === "final16") ? 1 : 0;
+    bracketImage(rounds, seeded, champ, label, cropFrom).then((im) => { if (alive) setImg(im); }).catch(() => {});
+    return () => { alive = false; };
+    /* eslint-disable-next-line */
+  }, [champ, view]);
   const pick = (top) => {
     if (anim || !cur) return; const mt = rounds[cur.r][cur.m], w = top ? mt.a : mt.b; setAnim(top ? "t" : "b");
-    setTimeout(async () => {
+    setTimeout(() => {
       const nx = rounds.map((rd) => rd.map((m) => ({ ...m }))); nx[cur.r][cur.m].winner = w;
       if (cur.r + 1 < nx.length) { const tm = nx[cur.r + 1][Math.floor(cur.m / 2)]; if (cur.m % 2 === 0) tm.a = w; else tm.b = w; }
       setRounds(nx); setAnim(null);
       const fin = nx[nx.length - 1][0].winner;
-      if (fin) { setChamp(fin); try { setImg(await bracketImage(nx, seeded, fin, label)); } catch (e) {} }
+      if (fin) setChamp(fin);   // image generation handled by the effect above
     }, 320);
   };
   const again = () => start(size);
@@ -260,6 +275,12 @@ function Bracket({ pool, label, onHome }) {
   if (champ) return (
     <div className="mb-shell">
       <div className="mb-champ"><div className="eyebrow mb-mono">Tonight's headliner</div><h1 className="mb-anton headliner">{champ.name}</h1>{champ.sub && <div className="csub">{champ.sub}</div>}</div>
+      {size === 32 && (
+        <div className="mb-toggle" style={{ maxWidth: 400, margin: "0 auto 14px" }}>
+          <button className={view === "final16" ? "on" : ""} onClick={() => setView("final16")}>Final 16</button>
+          <button className={view === "full32" ? "on" : ""} onClick={() => setView("full32")}>Full 32</button>
+        </div>
+      )}
       {img ? <img className="mb-shareimg" src={img} alt="Bracket" style={{ width: 400 }} /> : <p className="mb-mono" style={{ textAlign: "center" }}>Rendering…</p>}
       <div className="mb-actions">
         <button className="mb-btn" onClick={() => shareURL(img, "bracket.png", `My champion: ${champ.name}\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button>
