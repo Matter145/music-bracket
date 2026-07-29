@@ -13,7 +13,7 @@ const INK = "#17140F", PAPER = "#E9E3D4", RED = "#EE3B26", BLUE = "#2439DB";
 
 // ---- BRANDING — edit these two lines only ----
 const HANDLE = "@CornishIndieRockGuy";
-const SITE_URL = "musicbracket.vercel.app";   // ← put your real site URL here (no https://)
+const SITE_URL = "music-bracket-1mj1.vercel.app";   // your live site (no https://)
 
 // ---------- link parsing ----------
 function parseSpotifyLink(raw) {
