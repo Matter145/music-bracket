@@ -50,6 +50,34 @@ function artistPool(pool) {
   pool.forEach((t) => { if (t.sub && !seen.has(t.sub)) seen.set(t.sub, { id: "artist-" + seen.size, name: t.sub, sub: null, img: t.img || null }); });
   return [...seen.values()];
 }
+// Unique artist names in a pool, in first-appearance order.
+function poolArtists(pool) {
+  const seen = []; const set = new Set();
+  pool.forEach((t) => { const a = t.sub || t.name; if (a && !set.has(a)) { set.add(a); seen.push(a); } });
+  return seen;
+}
+// Safe localStorage (no-ops in environments without it, e.g. the in-chat preview).
+function lsGet(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
+function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+
+// ---- Challenge links: encode a fixed game setup into a URL param, decode on load ----
+// Payload: { k:game, g:genreIndex, u:unit, z:size, o:[full-pool indices in play order] }
+function encodeChallenge(payload) {
+  try { return btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/=+$/, ""); } catch (e) { return ""; }
+}
+function decodeChallenge(str) {
+  try { return JSON.parse(decodeURIComponent(escape(atob(str)))); } catch (e) { return null; }
+}
+function readChallengeParam() {
+  try {
+    const m = (location.hash + location.search).match(/[#&?]c=([^&]+)/);
+    return m ? decodeChallenge(decodeURIComponent(m[1])) : null;
+  } catch (e) { return null; }
+}
+function challengeURL(payload) {
+  const base = SITE_URL.startsWith("http") ? SITE_URL : "https://" + SITE_URL;
+  return `${base}/#c=${encodeURIComponent(encodeChallenge(payload))}`;
+}
 async function shareURL(url, name, text) {
   if (!url) return;
   try { const b = await (await fetch(url)).blob(); const f = new File([b], name, { type: "image/png" }); if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], text }); return; } } catch (e) {}
@@ -127,15 +155,19 @@ function buildColumns(rounds, seeded, geo) {
   if (cur) { const p = cols[cur.r]; if (p[cur.m * 2]) p[cur.m * 2].cur = true; if (p[cur.m * 2 + 1]) p[cur.m * 2 + 1].cur = true; }
   return cols;
 }
-function makeBracket(pool, size) {
-  const n = size || (pool.length >= 16 ? 16 : pool.length >= 8 ? 8 : 0); if (!n) return null;
-  const picked = drawCapped(pool, n, 3);
-  const order = seedOrder(n).map((s) => picked[s - 1]);
-  const rounds = []; let mc = n / 2; const first = [];
+const entryIndex = (e) => parseInt(String(e.id).split("-").pop(), 10);   // original pool index from an entry id
+function bracketFromOrder(order) {
+  const n = order.length, rounds = []; let mc = n / 2; const first = [];
   for (let i = 0; i < mc; i++) first.push({ a: order[i * 2], b: order[i * 2 + 1], winner: null });
   rounds.push(first); mc /= 2;
   while (mc >= 1) { const r = []; for (let i = 0; i < mc; i++) r.push({ a: null, b: null, winner: null }); rounds.push(r); mc /= 2; }
   return { rounds, seeded: order };
+}
+function makeBracket(pool, size) {
+  const n = size || (pool.length >= 16 ? 16 : pool.length >= 8 ? 8 : 0); if (!n) return null;
+  const picked = drawCapped(pool, n, 3);
+  const order = seedOrder(n).map((s) => picked[s - 1]);
+  return bracketFromOrder(order);
 }
 const roundName = (s) => ({ 16: "Round of 16", 8: "Quarter-final", 4: "Semi-final", 2: "Final" }[s] || `Round of ${s}`);
 
@@ -227,17 +259,25 @@ async function bracketImage(rounds, seeded, champ, meta, cropFrom = 0) {
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
-function Bracket({ pool, label, onHome }) {
+function Bracket({ pool, label, onHome, fixedOrder = null, challengeCtx = null }) {
   const sizes = useMemo(() => [8, 16, 32].filter((s) => pool.length >= s), [pool]);
-  const [size, setSize] = useState(null);
-  const [rounds, setRounds] = useState(null);
-  const [seeded, setSeeded] = useState(null);
+  const initB = useMemo(() => (fixedOrder && fixedOrder.length ? bracketFromOrder(fixedOrder) : null), []);
+  const [size, setSize] = useState(initB ? fixedOrder.length : null);
+  const [rounds, setRounds] = useState(initB ? initB.rounds : null);
+  const [seeded, setSeeded] = useState(initB ? initB.seeded : null);
   const [anim, setAnim] = useState(null);
   const [champ, setChamp] = useState(null);
   const [img, setImg] = useState(null);
   const [view, setView] = useState("final16");   // 32-brackets: "final16" | "full32"
+  const [copied, setCopied] = useState(false);
   const start = (s) => { const nb = makeBracket(pool, s); setSize(s); setRounds(nb.rounds); setSeeded(nb.seeded); setChamp(null); setImg(null); setView("final16"); };
-  useEffect(() => { if (sizes.length === 1) start(sizes[0]); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (!initB && sizes.length === 1) start(sizes[0]); /* eslint-disable-next-line */ }, []);
+  const shareChallenge = () => {
+    if (!challengeCtx || !seeded) return;
+    const url = challengeURL({ k: "bracket", g: challengeCtx.g, u: challengeCtx.u, z: size, o: seeded.map(entryIndex) });
+    try { navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {}
+    if (navigator.share) { try { navigator.share({ text: `Can you beat my bracket? Same ${size} tracks — your picks:`, url }); } catch (e) {} }
+  };
   // (re)render the share poster whenever a champion is crowned or the crop view changes
   useEffect(() => {
     if (!champ) return; let alive = true;
@@ -285,6 +325,7 @@ function Bracket({ pool, label, onHome }) {
       <div className="mb-actions">
         <button className="mb-btn" onClick={() => shareURL(img, "bracket.png", `My champion: ${champ.name}\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button>
         <button className="mb-btn ghost" onClick={() => downloadURL(img, "bracket.png")}>Save</button>
+        {challengeCtx && <button className="mb-btn ghost" onClick={shareChallenge}>{copied ? "Link copied ✓" : "Challenge a friend"}</button>}
         <button className="mb-btn ghost" onClick={again}>Run it back</button>
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
       </div>
@@ -601,6 +642,44 @@ function Festival({ pools, label, onHome }) {
 }
 
 // ================= APP =================
+// Edit pool: tick artists in/out. Choices persist per genre (handled by the parent).
+function EditPool({ genre, excluded, onSave, onHome }) {
+  const artistList = useMemo(() => {
+    const counts = {}; genre.tracks.forEach((t) => { counts[t.sub] = (counts[t.sub] || 0) + 1; });
+    return Object.keys(counts).sort((a, b) => a.localeCompare(b)).map((name) => ({ name, count: counts[name] }));
+  }, [genre]);
+  const [out, setOut] = useState(() => new Set(excluded));
+  const toggle = (name) => { const n = new Set(out); n.has(name) ? n.delete(name) : n.add(name); setOut(n); };
+  const inCount = artistList.length - out.size;
+  const save = () => { onSave([...out]); onHome(); };
+  return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Edit pool</div><div className="mb-round mb-mono">{slice(genre.genre, 22)}<br />{inCount}/{artistList.length} in</div></div>
+      <p className="mb-note mb-mono">Tap to remove artists you don't want in the games. Saved for next time.</p>
+      <div className="mb-editactions">
+        <button className="mb-btn ghost" onClick={() => setOut(new Set())}>All in</button>
+        <button className="mb-btn ghost" onClick={() => setOut(new Set(artistList.map((a) => a.name)))}>All out</button>
+      </div>
+      <div className="mb-editlist">
+        {artistList.map((a) => {
+          const isIn = !out.has(a.name);
+          return (
+            <button key={a.name} className={"mb-editchip" + (isIn ? " in" : "")} onClick={() => toggle(a.name)}>
+              <span className="mb-editcheck">{isIn ? "✓" : ""}</span>
+              <span className="mb-editname">{a.name}</span>
+              <span className="mb-editcount mb-mono">{a.count}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mb-actions">
+        <button className="mb-btn" onClick={save} disabled={inCount < 5}>{inCount < 5 ? "Keep at least 5 in" : "Save & back"}</button>
+        <button className="mb-btn ghost" onClick={onHome}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 const GAMES = [
   { k: "bracket", t: "Bracket Battles", d: "Pick 8, 16 or 32 — one comes out. Knockout picks with a live draw.", min: 8 },
   { k: "blind", t: "Blind Rank Top 5", d: "One track at a time. Commit to a slot before you see what's next.", min: 5 },
@@ -648,6 +727,18 @@ const CSS = `
 .mb-genregrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .mb-toggle{display:flex;border:3px solid var(--ink);box-shadow:5px 5px 0 var(--ink);margin:0 0 18px;background:var(--paper)}
 .mb-rankby{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.65;margin:2px 2px 6px}
+.mb-editrow{margin:0 0 14px}
+.mb-editbtn{width:100%}
+.mb-editactions{display:flex;gap:8px;margin-bottom:12px}
+.mb-editactions .mb-btn{flex:1}
+.mb-editlist{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.mb-editchip{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 12px;border:2px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;opacity:.4}
+.mb-editchip.in{opacity:1;box-shadow:2px 2px 0 var(--ink)}
+.mb-editcheck{flex:0 0 18px;width:18px;height:18px;border:2px solid var(--ink);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.mb-editchip.in .mb-editcheck{background:var(--ink);color:var(--paper)}
+.mb-editname{flex:1;font-family:'Space Grotesk';font-weight:600;font-size:15px}
+.mb-editchip:not(.in) .mb-editname{text-decoration:line-through}
+.mb-editcount{font-size:12px;opacity:.6}
 .mb-sizegrid{display:flex;gap:12px;justify-content:center;margin:10px 0 20px}
 .mb-fest-sec{border:3px solid var(--ink);border-bottom:none}
 .mb-fest-sec:last-of-type{border-bottom:3px solid var(--ink)}
@@ -722,15 +813,31 @@ export default function App() {
   const [pool, setPool] = useState(null);
   const [poolLabel, setPoolLabel] = useState("");
   const [genreObj, setGenreObj] = useState(null);
-  const [screen, setScreen] = useState("connect");   // connect | genres | menu | <game>
+  const [screen, setScreen] = useState("connect");   // connect | genres | menu | edit | <game>
   const [unit, setUnit] = useState("tracks");         // tracks | artists
+  const [excluded, setExcluded] = useState([]);       // artist names filtered OUT of the pool (persisted per genre)
+  const [challenge, setChallenge] = useState(null);   // decoded incoming challenge, if any
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const styled = useRef(false);
   useEffect(() => { if (styled.current) return; styled.current = true; const el = document.createElement("style"); el.textContent = CSS; document.head.appendChild(el); }, []);
 
+  // ---- incoming challenge link: rebuild the exact game and jump into it ----
+  useEffect(() => {
+    const c = readChallengeParam(); if (!c || c.g == null || !GENRES[c.g]) return;
+    const genre = GENRES[c.g];
+    const base = c.u === "artists" ? artistPool(genrePool(genre)) : genrePool(genre);
+    const order = (c.o || []).map((i) => base[i]).filter(Boolean);
+    if (c.k === "bracket" && order.length === c.z) {
+      setGenreObj(genre); setPool(genrePool(genre)); setPoolLabel(genre.genre + " · challenge"); setUnit(c.u || "tracks");
+      setChallenge({ order }); setScreen("bracket");
+    }
+    /* eslint-disable-next-line */
+  }, []);
+
   // ---- A. genre (local, no API) ----
-  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setGenreObj(g); setUnit("tracks"); setScreen("menu"); };
+  const pickGenre = (g) => { setPool(genrePool(g)); setPoolLabel(g.genre); setGenreObj(g); setUnit("tracks"); setExcluded(lsGet("exclude-" + g.genre, [])); setChallenge(null); setScreen("menu"); };
+  const saveExclusions = (list) => { setExcluded(list); if (genreObj) lsSet("exclude-" + genreObj.genre, list); };
 
   // ---- B. one or more album links (live) ----
   const loadAlbums = useCallback(async () => {
@@ -814,13 +921,21 @@ export default function App() {
     </div>
   );
   else if (screen === "menu") {
-    const artists = artistPool(pool);
+    const exSet = new Set(excluded);
+    const filteredPool = pool.filter((t) => !exSet.has(t.sub || t.name));
+    const artists = artistPool(filteredPool);
     const canArtists = artists.length >= 5;
-    const active = unit === "artists" ? artists : pool;
+    const active = unit === "artists" ? artists : filteredPool;
     const noun = unit === "artists" ? "artists" : "tracks";
+    const allArtistCount = poolArtists(pool).length;
     body = (
       <div className="mb-shell">
         <div className="mb-bill"><div className="mb-anton mb-title">Choose a game</div><div className="mb-round mb-mono">{slice(poolLabel, 22)}<br />{active.length} {noun}</div></div>
+        {genreObj && (
+          <div className="mb-editrow">
+            <button className="mb-btn ghost mb-editbtn" onClick={() => setScreen("edit")}>Edit pool{excluded.length ? ` · ${allArtistCount - excluded.length}/${allArtistCount} artists` : ""}</button>
+          </div>
+        )}
         <div className="mb-rankby mb-mono">Rank by</div>
         <div className="mb-toggle">
           <button className={unit === "tracks" ? "on" : ""} onClick={() => setUnit("tracks")}>Tracks</button>
@@ -848,10 +963,17 @@ export default function App() {
       </div>
     );
   }
-  else if (screen === "bracket") body = <Bracket key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
-  else if (screen === "blind") body = <BlindRank key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
-  else if (screen === "tier") body = <TierList key={unit} pool={unit === "artists" ? artistPool(pool) : pool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />;
+  else if (screen === "bracket") {
+    const exSet = new Set(excluded);
+    const fp = pool ? pool.filter((t) => !exSet.has(t.sub || t.name)) : [];
+    const gamePool = unit === "artists" ? artistPool(fp) : fp;
+    const ctx = genreObj ? { g: GENRES.indexOf(genreObj), u: unit } : null;
+    body = <Bracket key={unit + (challenge ? "-c" : "")} pool={challenge ? gamePool : gamePool} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => { setChallenge(null); setScreen(genreObj ? "menu" : "connect"); }} fixedOrder={challenge ? challenge.order : null} challengeCtx={ctx} />;
+  }
+  else if (screen === "blind") { const exSet = new Set(excluded); const fp = pool.filter((t) => !exSet.has(t.sub || t.name)); body = <BlindRank key={unit} pool={unit === "artists" ? artistPool(fp) : fp} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />; }
+  else if (screen === "tier") { const exSet = new Set(excluded); const fp = pool.filter((t) => !exSet.has(t.sub || t.name)); body = <TierList key={unit} pool={unit === "artists" ? artistPool(fp) : fp} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />; }
   else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
+  else if (screen === "edit") body = <EditPool genre={genreObj} excluded={excluded} onSave={saveExclusions} onHome={() => setScreen("menu")} />;
 
   return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
 }
