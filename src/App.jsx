@@ -136,6 +136,31 @@ function wrapLabel(name, max = 20) {
 }
 const colX = (c) => LM + c * COL_W;
 function seedOrder(n) { let r = [1]; while (r.length < n) { const s = r.length * 2, nx = []; for (const x of r) { nx.push(x); nx.push(s + 1 - x); } r = nx; } return r; }
+
+// ---- Daily challenge: everything below derives deterministically from the date,
+// so every device produces the identical daily bracket/tier/blind. No backend. ----
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function seededShuffleTake(arr, k, rng) { const idx = arr.map((_, i) => i); for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; } return idx.slice(0, k).map((i) => arr[i]); }
+function seededDrawCapped(pool, n, maxPer, rng) {
+  const sh = seededShuffleTake(pool, pool.length, rng), counts = {}, out = [];
+  for (const t of sh) { const a = t.sub || t.name; if ((counts[a] || 0) < maxPer) { counts[a] = (counts[a] || 0) + 1; out.push(t); if (out.length === n) return out; } }
+  for (const t of sh) { if (!out.includes(t)) { out.push(t); if (out.length === n) break; } }
+  return out;
+}
+function todayStr(d = new Date()) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function daysSinceEpoch(dateStr) { return Math.floor(new Date(dateStr + "T00:00:00").getTime() / 86400000); }
+// The whole day's challenge, derived purely from the date string.
+function dailySetup(dateStr) {
+  const genre = GENRES[daysSinceEpoch(dateStr) % GENRES.length];
+  const pool = genrePool(genre);
+  const rngFor = (key) => mulberry32(hashStr(dateStr + "|" + key));
+  const picked = seededDrawCapped(pool, Math.min(16, pool.length), 3, rngFor("bracket"));
+  const bracketOrder = seedOrder(picked.length).map((s) => picked[s - 1]);
+  const tierItems = seededDrawCapped(pool, Math.min(18, pool.length), 3, rngFor("tier"));
+  const blindItems = seededDrawCapped(pool, 5, 3, rngFor("blind"));
+  return { date: dateStr, genre, pool, bracketOrder, tierItems, blindItems };
+}
 function computeGeometry(rounds) {
   const slotY = (i) => TOP + (i + 0.5) * ROW_H, centers = [];
   for (let r = 0; r < rounds.length; r++) { centers[r] = []; for (let m = 0; m < rounds[r].length; m++) centers[r][m] = r === 0 ? (slotY(2 * m) + slotY(2 * m + 1)) / 2 : (centers[r - 1][2 * m] + centers[r - 1][2 * m + 1]) / 2; }
@@ -259,7 +284,7 @@ async function bracketImage(rounds, seeded, champ, meta, cropFrom = 0) {
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
-function Bracket({ pool, label, onHome, fixedOrder = null, challengeCtx = null }) {
+function Bracket({ pool, label, onHome, fixedOrder = null, challengeCtx = null, onResult = null }) {
   const sizes = useMemo(() => [8, 16, 32].filter((s) => pool.length >= s), [pool]);
   const initB = useMemo(() => (fixedOrder && fixedOrder.length ? bracketFromOrder(fixedOrder) : null), []);
   const [size, setSize] = useState(initB ? fixedOrder.length : null);
@@ -293,7 +318,7 @@ function Bracket({ pool, label, onHome, fixedOrder = null, challengeCtx = null }
       if (cur.r + 1 < nx.length) { const tm = nx[cur.r + 1][Math.floor(cur.m / 2)]; if (cur.m % 2 === 0) tm.a = w; else tm.b = w; }
       setRounds(nx); setAnim(null);
       const fin = nx[nx.length - 1][0].winner;
-      if (fin) setChamp(fin);   // image generation handled by the effect above
+      if (fin) { setChamp(fin); if (onResult) onResult(fin.name); }   // image generation handled by the effect above
     }, 320);
   };
   const again = () => start(size);
@@ -363,20 +388,20 @@ async function blindImage(slots, label) {
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
-function BlindRank({ pool, label, onHome }) {
-  const [five, setFive] = useState(() => drawCapped(pool, 5, 3));
+function BlindRank({ pool, label, onHome, fixedItems = null, onResult = null }) {
+  const [five, setFive] = useState(() => fixedItems || drawCapped(pool, 5, 3));
   const [slots, setSlots] = useState([null, null, null, null, null]);
   const [idx, setIdx] = useState(0);
   const [img, setImg] = useState(null);
   const [flash, setFlash] = useState(false);
   const done = idx >= 5;
-  useEffect(() => { if (done && !img) blindImage(slots, label).then(setImg).catch(() => {}); }, [done, img, slots, label]);
+  useEffect(() => { if (done && !img) { blindImage(slots, label).then(setImg).catch(() => {}); if (onResult) onResult(slots.map((t) => t.name)); } }, [done, img, slots, label]);
   const place = (s) => {
     if (done || slots[s]) return;
     const ns = [...slots]; ns[s] = five[idx]; setSlots(ns); setIdx(idx + 1);
     setFlash(true); setTimeout(() => setFlash(false), 260);
   };
-  const reset = () => { setFive(drawCapped(pool, 5, 3)); setSlots([null, null, null, null, null]); setIdx(0); setImg(null); };
+  const reset = () => { setFive(fixedItems || drawCapped(pool, 5, 3)); setSlots([null, null, null, null, null]); setIdx(0); setImg(null); };
   const cur = !done ? five[idx] : null;
   return (
     <div className="mb-shell">
@@ -408,7 +433,7 @@ function BlindRank({ pool, label, onHome }) {
       </>}
       <div className="mb-actions">
         {done && <><button className="mb-btn" onClick={() => shareURL(img, "blindrank.png", `My blind ranking\n\nMake yours at https://${SITE_URL} ${HANDLE}`)}>Share</button><button className="mb-btn ghost" onClick={() => downloadURL(img, "blindrank.png")}>Save</button></>}
-        <button className="mb-btn ghost" onClick={reset}>{done ? "New five" : "Start over"}</button>
+        {!fixedItems && <button className="mb-btn ghost" onClick={reset}>{done ? "New five" : "Start over"}</button>}
         <button className="mb-btn ghost" onClick={onHome}>Menu</button>
       </div>
     </div>
@@ -436,8 +461,8 @@ async function tierImage(items, placements, label) {
   await drawFooterQR(g, S);
   return cv.toDataURL("image/png");
 }
-function TierList({ pool, label, onHome }) {
-  const items = useMemo(() => drawCapped(pool, Math.min(18, pool.length), 3), [pool]);
+function TierList({ pool, label, onHome, fixedItems = null, onResult = null }) {
+  const items = useMemo(() => fixedItems || drawCapped(pool, Math.min(18, pool.length), 3), [pool]);
   const [placements, setPlacements] = useState({});
   const [sel, setSel] = useState(null);
   const [finished, setFinished] = useState(false);
@@ -445,7 +470,7 @@ function TierList({ pool, label, onHome }) {
   const tray = items.filter((i) => !placements[i.id]);
   const place = (k) => { if (sel) { setPlacements((p) => ({ ...p, [sel]: k })); setSel(null); } };
   const toTray = () => { if (sel) { setPlacements((p) => ({ ...p, [sel]: null })); setSel(null); } };
-  const finish = async () => { setFinished(true); try { setImg(await tierImage(items, placements, label)); } catch (e) {} };
+  const finish = async () => { setFinished(true); if (onResult) { const top = items.filter((i) => placements[i.id] === "S").map((i) => i.name); onResult(top); } try { setImg(await tierImage(items, placements, label)); } catch (e) {} };
   return (
     <div className="mb-shell">
       <div className="mb-bill"><div className="mb-anton mb-title">Tier List</div><div className="mb-round mb-mono">tap a chip,<br />then a tier</div></div>
@@ -680,6 +705,42 @@ function EditPool({ genre, excluded, onSave, onHome }) {
   );
 }
 
+// Daily hub: three date-seeded games, same for everyone today. Local stats only.
+function DailyHub({ setup, onPlay, onHome }) {
+  const done = { bracket: lsGet(`daily-${setup.date}-bracket`, null), tier: lsGet(`daily-${setup.date}-tier`, null), blind: lsGet(`daily-${setup.date}-blind`, null) };
+  const streak = lsGet("daily-streak", { count: 0, last: null });
+  const log = lsGet("daily-log", []);
+  const games = [
+    { k: "bracket", t: "Daily Bracket", d: "16 tracks, one winner." },
+    { k: "tier", t: "Daily Tier List", d: "Sort today's picks S–D." },
+    { k: "blind", t: "Daily Blind Rank", d: "Rank 5, no takebacks." },
+  ];
+  const top = (r) => (Array.isArray(r) ? (r[0] || "—") : r);
+  return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Daily Challenge</div><div className="mb-round mb-mono">{setup.date}<br />{setup.genre.genre}</div></div>
+      <p className="mb-note mb-mono">Same three games for everyone today. New set tomorrow.</p>
+      {streak.count > 0 && <div className="mb-streak mb-anton">STREAK · {streak.count} DAY{streak.count > 1 ? "S" : ""}</div>}
+      {games.map((g) => {
+        const r = done[g.k];
+        return (
+          <div key={g.k} className={"mb-card mb-gamecard" + (r ? " mb-daydone" : "")} onClick={() => onPlay(g.k)}>
+            <h2>{g.t}</h2>
+            <p style={{ margin: 0 }}>{r ? `Played today · ${top(r)}` : g.d}</p>
+          </div>
+        );
+      })}
+      {log.length > 0 && (
+        <div className="mb-daylog">
+          <div className="mb-rankby mb-mono">Recent results</div>
+          {log.slice(0, 6).map((e, i) => <div key={i} className="mb-daylogrow mb-mono"><span>{e.date} · {e.game}</span><b>{e.result}</b></div>)}
+        </div>
+      )}
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={onHome}>‹ Back</button></div>
+    </div>
+  );
+}
+
 const GAMES = [
   { k: "bracket", t: "Bracket Battles", d: "Pick 8, 16 or 32 — one comes out. Knockout picks with a live draw.", min: 8 },
   { k: "blind", t: "Blind Rank Top 5", d: "One track at a time. Commit to a slot before you see what's next.", min: 5 },
@@ -717,6 +778,15 @@ const CSS = `
 .mb-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:22px}
 .mb-hero{font-size:clamp(44px,13vw,92px);line-height:.82;text-align:center}.mb-hero .l1{color:var(--ink)}.mb-hero .l2{color:var(--red);text-shadow:3px 3px 0 var(--blue)}
 .mb-kicker{font-size:13px;letter-spacing:.24em;text-transform:uppercase;opacity:.75;margin-bottom:20px;text-align:center}
+.mb-daily-cta{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:16px 18px;margin-bottom:18px;border:3px solid var(--ink);background:var(--red);color:var(--paper);box-shadow:6px 6px 0 var(--ink);cursor:pointer}
+.mb-daily-cta .mb-anton{font-size:26px;line-height:1}
+.mb-daily-tag{font-size:11px;letter-spacing:.12em}
+.mb-streak{display:inline-block;background:var(--ink);color:var(--paper);padding:6px 12px;font-size:14px;letter-spacing:.06em;margin-bottom:14px}
+.mb-daydone h2{opacity:.6}
+.mb-daylog{border:2px solid var(--ink);padding:12px;margin:6px 0 16px}
+.mb-daylogrow{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px dashed rgba(23,20,15,.2)}
+.mb-daylogrow:last-child{border-bottom:none}
+.mb-daylogrow b{text-align:right}
 .mb-card{border:3px solid var(--ink);background:var(--paper);box-shadow:6px 6px 0 var(--ink);padding:18px;text-align:left;margin:14px 0}
 .mb-card h2{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin:0 0 4px;color:var(--ink)}.mb-card p{margin:0 0 12px;font-size:14px;line-height:1.45;color:var(--ink)}
 .mb-gamecard{cursor:pointer;transition:transform .1s,box-shadow .1s}.mb-gamecard:hover{transform:translate(-2px,-2px);box-shadow:9px 9px 0 var(--ink)}
@@ -817,6 +887,20 @@ export default function App() {
   const [unit, setUnit] = useState("tracks");         // tracks | artists
   const [excluded, setExcluded] = useState([]);       // artist names filtered OUT of the pool (persisted per genre)
   const [challenge, setChallenge] = useState(null);   // decoded incoming challenge, if any
+  const daily = useMemo(() => dailySetup(todayStr()), []);
+  const recordDaily = (game, result) => {
+    const date = daily.date;
+    lsSet(`daily-${date}-${game}`, result);
+    const log = lsGet("daily-log", []);
+    log.unshift({ date, game, result: Array.isArray(result) ? (result[0] || "—") : result });
+    lsSet("daily-log", log.slice(0, 30));
+    const st = lsGet("daily-streak", { count: 0, last: null });
+    if (st.last !== date) {
+      const yesterday = todayStr(new Date(Date.now() - 86400000));
+      st.count = st.last === yesterday ? st.count + 1 : 1; st.last = date;
+      lsSet("daily-streak", st);
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const styled = useRef(false);
@@ -887,6 +971,11 @@ export default function App() {
       <div className="mb-kicker">pick a genre or paste albums · play the games</div>
       <h1 className="mb-anton mb-hero"><span className="l1">Music</span> <span className="l2">Bracket</span></h1>
       <div style={{ height: 18 }} />
+      <button className="mb-daily-cta" onClick={() => setScreen("daily")}>
+        <span className="mb-daily-tag mb-mono">TODAY · {daily.genre.genre}</span>
+        <span className="mb-anton">Daily Challenge ›</span>
+        <span className="mb-mono" style={{ fontSize: 11, opacity: .7 }}>Same games for everyone. Come back daily.</span>
+      </button>
       <div className="mb-twocol">
         <div className="mb-card" style={{ margin: 0 }}>
           <span className="mb-tag">INSTANT · NO LINK</span>
@@ -974,6 +1063,10 @@ export default function App() {
   else if (screen === "tier") { const exSet = new Set(excluded); const fp = pool.filter((t) => !exSet.has(t.sub || t.name)); body = <TierList key={unit} pool={unit === "artists" ? artistPool(fp) : fp} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />; }
   else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
   else if (screen === "edit") body = <EditPool genre={genreObj} excluded={excluded} onSave={saveExclusions} onHome={() => setScreen("menu")} />;
+  else if (screen === "daily") body = <DailyHub setup={daily} onPlay={(gm) => setScreen("d-" + gm)} onHome={() => setScreen("connect")} />;
+  else if (screen === "d-bracket") body = <Bracket key="db" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedOrder={daily.bracketOrder} onResult={(r) => recordDaily("bracket", r)} onHome={() => setScreen("daily")} />;
+  else if (screen === "d-blind") body = <BlindRank key="dbl" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedItems={daily.blindItems} onResult={(r) => recordDaily("blind", r)} onHome={() => setScreen("daily")} />;
+  else if (screen === "d-tier") body = <TierList key="dt" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedItems={daily.tierItems} onResult={(r) => recordDaily("tier", r)} onHome={() => setScreen("daily")} />;
 
   return <div className="mb-root">{body}<div className="mb-credit"><span className="mb-credit-mark mb-anton">M</span> created by <b>{HANDLE}</b></div></div>;
 }
