@@ -161,6 +161,26 @@ function dailySetup(dateStr) {
   const blindItems = seededDrawCapped(pool, 5, 3, rngFor("blind"));
   return { date: dateStr, genre, pool, bracketOrder, tierItems, blindItems };
 }
+// Re-render a past daily poster from its stored record (function decls are hoisted).
+async function renderDailyPoster(rec) {
+  const genre = GENRES[rec.g], pool = genrePool(genre), label = genre.genre + " · " + rec.date;
+  if (rec.game === "bracket") {
+    const order = rec.o.map((i) => pool[i]); const nb = bracketFromOrder(order);
+    for (let r = 0; r < rec.w.length; r++) for (let m = 0; m < rec.w[r].length; m++) {
+      const w = pool[rec.w[r][m]]; nb.rounds[r][m].winner = w;
+      if (r + 1 < nb.rounds.length) { const tm = nb.rounds[r + 1][Math.floor(m / 2)]; if (m % 2 === 0) tm.a = w; else tm.b = w; }
+    }
+    const champ = pool[rec.w[rec.w.length - 1][0]];
+    return bracketImage(nb.rounds, nb.seeded, champ, label, 0);
+  }
+  if (rec.game === "tier") {
+    const items = dailySetup(rec.date).tierItems, placements = {};
+    items.forEach((it) => { const idx = entryIndex(it); if (rec.pl[idx]) placements[it.id] = rec.pl[idx]; });
+    return tierImage(items, placements, label);
+  }
+  if (rec.game === "blind") return blindImage(rec.order.map((i) => pool[i]), label);
+  return null;
+}
 function computeGeometry(rounds) {
   const slotY = (i) => TOP + (i + 0.5) * ROW_H, centers = [];
   for (let r = 0; r < rounds.length; r++) { centers[r] = []; for (let m = 0; m < rounds[r].length; m++) centers[r][m] = r === 0 ? (slotY(2 * m) + slotY(2 * m + 1)) / 2 : (centers[r - 1][2 * m] + centers[r - 1][2 * m + 1]) / 2; }
@@ -318,7 +338,7 @@ function Bracket({ pool, label, onHome, fixedOrder = null, challengeCtx = null, 
       if (cur.r + 1 < nx.length) { const tm = nx[cur.r + 1][Math.floor(cur.m / 2)]; if (cur.m % 2 === 0) tm.a = w; else tm.b = w; }
       setRounds(nx); setAnim(null);
       const fin = nx[nx.length - 1][0].winner;
-      if (fin) { setChamp(fin); if (onResult) onResult(fin.name); }   // image generation handled by the effect above
+      if (fin) { setChamp(fin); if (onResult) onResult({ champ: fin.name, o: seeded.map(entryIndex), w: nx.map((rd) => rd.map((m) => entryIndex(m.winner))) }); }   // image via effect above
     }, 320);
   };
   const again = () => start(size);
@@ -395,7 +415,7 @@ function BlindRank({ pool, label, onHome, fixedItems = null, onResult = null }) 
   const [img, setImg] = useState(null);
   const [flash, setFlash] = useState(false);
   const done = idx >= 5;
-  useEffect(() => { if (done && !img) { blindImage(slots, label).then(setImg).catch(() => {}); if (onResult) onResult(slots.map((t) => t.name)); } }, [done, img, slots, label]);
+  useEffect(() => { if (done && !img) { blindImage(slots, label).then(setImg).catch(() => {}); if (onResult) onResult({ order: slots.map(entryIndex), names: slots.map((t) => t.name) }); } }, [done, img, slots, label]);
   const place = (s) => {
     if (done || slots[s]) return;
     const ns = [...slots]; ns[s] = five[idx]; setSlots(ns); setIdx(idx + 1);
@@ -470,7 +490,7 @@ function TierList({ pool, label, onHome, fixedItems = null, onResult = null }) {
   const tray = items.filter((i) => !placements[i.id]);
   const place = (k) => { if (sel) { setPlacements((p) => ({ ...p, [sel]: k })); setSel(null); } };
   const toTray = () => { if (sel) { setPlacements((p) => ({ ...p, [sel]: null })); setSel(null); } };
-  const finish = async () => { setFinished(true); if (onResult) { const top = items.filter((i) => placements[i.id] === "S").map((i) => i.name); onResult(top); } try { setImg(await tierImage(items, placements, label)); } catch (e) {} };
+  const finish = async () => { setFinished(true); if (onResult) { const pl = {}; items.forEach((it) => { if (placements[it.id]) pl[entryIndex(it)] = placements[it.id]; }); const top = items.filter((i) => placements[i.id] === "S").map((i) => i.name); onResult({ pl, top }); } try { setImg(await tierImage(items, placements, label)); } catch (e) {} };
   return (
     <div className="mb-shell">
       <div className="mb-bill"><div className="mb-anton mb-title">Tier List</div><div className="mb-round mb-mono">tap a chip,<br />then a tier</div></div>
@@ -706,36 +726,112 @@ function EditPool({ genre, excluded, onSave, onHome }) {
 }
 
 // Daily hub: three date-seeded games, same for everyone today. Local stats only.
-function DailyHub({ setup, onPlay, onHome }) {
-  const done = { bracket: lsGet(`daily-${setup.date}-bracket`, null), tier: lsGet(`daily-${setup.date}-tier`, null), blind: lsGet(`daily-${setup.date}-blind`, null) };
+function DailyHub({ setup, onPlay, onStats, onHome }) {
+  const plays = lsGet("daily-plays", []);
+  const todays = {}; plays.forEach((p) => { if (p.date === setup.date && !todays[p.game]) todays[p.game] = p; });
   const streak = lsGet("daily-streak", { count: 0, last: null });
-  const log = lsGet("daily-log", []);
   const games = [
     { k: "bracket", t: "Daily Bracket", d: "16 tracks, one winner." },
     { k: "tier", t: "Daily Tier List", d: "Sort today's picks S–D." },
     { k: "blind", t: "Daily Blind Rank", d: "Rank 5, no takebacks." },
   ];
-  const top = (r) => (Array.isArray(r) ? (r[0] || "—") : r);
+  const recent = plays.slice(0, 8);
+  const gname = { bracket: "Bracket", tier: "Tier", blind: "Blind" };
   return (
     <div className="mb-shell">
       <div className="mb-bill"><div className="mb-anton mb-title">Daily Challenge</div><div className="mb-round mb-mono">{setup.date}<br />{setup.genre.genre}</div></div>
       <p className="mb-note mb-mono">Same three games for everyone today. New set tomorrow.</p>
       {streak.count > 0 && <div className="mb-streak mb-anton">STREAK · {streak.count} DAY{streak.count > 1 ? "S" : ""}</div>}
       {games.map((g) => {
-        const r = done[g.k];
+        const r = todays[g.k];
         return (
           <div key={g.k} className={"mb-card mb-gamecard" + (r ? " mb-daydone" : "")} onClick={() => onPlay(g.k)}>
             <h2>{g.t}</h2>
-            <p style={{ margin: 0 }}>{r ? `Played today · ${top(r)}` : g.d}</p>
+            <p style={{ margin: 0 }}>{r ? `Played today · ${r.winner}` : g.d}</p>
           </div>
         );
       })}
-      {log.length > 0 && (
-        <div className="mb-daylog">
-          <div className="mb-rankby mb-mono">Recent results</div>
-          {log.slice(0, 6).map((e, i) => <div key={i} className="mb-daylogrow mb-mono"><span>{e.date} · {e.game}</span><b>{e.result}</b></div>)}
-        </div>
+      {plays.length > 0 && (
+        <>
+          <div className="mb-feedhead"><div className="mb-rankby mb-mono">Your feed</div><button className="mb-btn ghost mb-statsbtn" onClick={onStats}>Stats ›</button></div>
+          <div className="mb-daylog">
+            {recent.map((e, i) => (
+              <button key={i} className="mb-feedrow" onClick={() => onStats(e)}>
+                <span className="mb-feedgame mb-mono">{gname[e.game]}</span>
+                <span className="mb-feedwin">{e.winner}</span>
+                <span className="mb-feeddate mb-mono">{e.date.slice(5)}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
+      <div className="mb-actions"><button className="mb-btn ghost" onClick={onHome}>‹ Back</button></div>
+    </div>
+  );
+}
+
+// Daily stats: per-game tallies of your winners, click through to that day's poster.
+function DailyStats({ initialRec, onHome }) {
+  const plays = lsGet("daily-plays", []);
+  const [focus, setFocus] = useState(null);   // { game, name } drill-down
+  const [openRec, setOpenRec] = useState(initialRec || null);
+  const [img, setImg] = useState(null);
+  useEffect(() => { let alive = true; if (openRec) { setImg(null); renderDailyPoster(openRec).then((im) => { if (alive) setImg(im); }).catch(() => {}); } return () => { alive = false; }; }, [openRec]);
+
+  const tally = (game, pick) => {
+    const counts = {};
+    plays.filter((p) => p.game === game).forEach((p) => { const v = pick(p); if (v) counts[v] = (counts[v] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  };
+  const sections = [
+    { game: "bracket", title: "Bracket champions", rows: tally("bracket", (p) => p.winner) },
+    { game: "tier", title: "S-tier picks", rows: (() => { const c = {}; plays.filter((p) => p.game === "tier").forEach((p) => (p.top || []).forEach((n) => c[n] = (c[n] || 0) + 1)); return Object.entries(c).sort((a, b) => b[1] - a[1]); })() },
+    { game: "blind", title: "Blind #1s", rows: tally("blind", (p) => p.winner) },
+  ];
+  const daysFor = (game, name) => plays.filter((p) => p.game === game && (game === "tier" ? (p.top || []).includes(name) : p.winner === name));
+
+  // poster view
+  if (openRec) return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">{openRec.date}</div><div className="mb-round mb-mono">{openRec.game}<br />{openRec.winner}</div></div>
+      {img ? <img className="mb-shareimg" src={img} alt="Result" style={{ width: 400 }} /> : <p className="mb-mono" style={{ textAlign: "center" }}>Rendering…</p>}
+      <div className="mb-actions">
+        {img && <button className="mb-btn" onClick={() => shareURL(img, "daily.png", `My ${openRec.date} daily\n\nPlay at https://${SITE_URL} ${HANDLE}`)}>Share</button>}
+        <button className="mb-btn ghost" onClick={() => setOpenRec(null)}>‹ Back</button>
+      </div>
+    </div>
+  );
+
+  // drill-down: days a given pick appeared
+  if (focus) {
+    const days = daysFor(focus.game, focus.name);
+    return (
+      <div className="mb-shell">
+        <div className="mb-bill"><div className="mb-anton mb-title">{slice(focus.name, 20)}</div><div className="mb-round mb-mono">{focus.game}<br />{days.length}×</div></div>
+        <div className="mb-daylog">
+          {days.map((d, i) => <button key={i} className="mb-feedrow" onClick={() => setOpenRec(d)}><span className="mb-feeddate mb-mono">{d.date}</span><span className="mb-feedwin">view result ›</span></button>)}
+        </div>
+        <div className="mb-actions"><button className="mb-btn ghost" onClick={() => setFocus(null)}>‹ Back to stats</button></div>
+      </div>
+    );
+  }
+
+  // stats overview
+  return (
+    <div className="mb-shell">
+      <div className="mb-bill"><div className="mb-anton mb-title">Your stats</div><div className="mb-round mb-mono">{plays.length} plays</div></div>
+      {plays.length === 0 && <p className="mb-note mb-mono">Play some dailies and your tallies show up here.</p>}
+      {sections.map((s) => s.rows.length > 0 && (
+        <div key={s.game} className="mb-statsec">
+          <div className="mb-rankby mb-mono">{s.title}</div>
+          {s.rows.slice(0, 12).map(([name, n]) => (
+            <button key={name} className="mb-statrow" onClick={() => setFocus({ game: s.game, name })}>
+              <span className="mb-statname">{name}</span>
+              <span className="mb-statcount mb-mono">{n}× ›</span>
+            </button>
+          ))}
+        </div>
+      ))}
       <div className="mb-actions"><button className="mb-btn ghost" onClick={onHome}>‹ Back</button></div>
     </div>
   );
@@ -784,6 +880,18 @@ const CSS = `
 .mb-streak{display:inline-block;background:var(--ink);color:var(--paper);padding:6px 12px;font-size:14px;letter-spacing:.06em;margin-bottom:14px}
 .mb-daydone h2{opacity:.6}
 .mb-daylog{border:2px solid var(--ink);padding:12px;margin:6px 0 16px}
+.mb-feedhead{display:flex;align-items:center;justify-content:space-between;margin:6px 0}
+.mb-statsbtn{padding:6px 12px;font-size:13px}
+.mb-feedrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;border-bottom:1px dashed rgba(23,20,15,.2);padding:8px 2px;cursor:pointer;color:var(--ink)}
+.mb-feedrow:last-child{border-bottom:none}
+.mb-feedgame{flex:0 0 58px;font-size:11px;text-transform:uppercase;opacity:.6}
+.mb-feedwin{flex:1;font-family:'Space Grotesk';font-weight:600;font-size:14px}
+.mb-feeddate{font-size:11px;opacity:.55}
+.mb-statsec{border:2px solid var(--ink);padding:12px;margin-bottom:14px}
+.mb-statrow{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;background:none;border:none;border-bottom:1px dashed rgba(23,20,15,.2);padding:9px 2px;cursor:pointer;color:var(--ink)}
+.mb-statrow:last-child{border-bottom:none}
+.mb-statname{font-family:'Space Grotesk';font-weight:600;font-size:15px}
+.mb-statcount{font-size:12px;opacity:.65;white-space:nowrap;padding-left:10px}
 .mb-daylogrow{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px dashed rgba(23,20,15,.2)}
 .mb-daylogrow:last-child{border-bottom:none}
 .mb-daylogrow b{text-align:right}
@@ -887,13 +995,15 @@ export default function App() {
   const [unit, setUnit] = useState("tracks");         // tracks | artists
   const [excluded, setExcluded] = useState([]);       // artist names filtered OUT of the pool (persisted per genre)
   const [challenge, setChallenge] = useState(null);   // decoded incoming challenge, if any
+  const [statsRec, setStatsRec] = useState(null);      // a play record to open directly in stats
   const daily = useMemo(() => dailySetup(todayStr()), []);
-  const recordDaily = (game, result) => {
-    const date = daily.date;
-    lsSet(`daily-${date}-${game}`, result);
-    const log = lsGet("daily-log", []);
-    log.unshift({ date, game, result: Array.isArray(result) ? (result[0] || "—") : result });
-    lsSet("daily-log", log.slice(0, 30));
+  const recordDaily = (game, detail) => {
+    const date = daily.date, g = GENRES.indexOf(daily.genre);
+    const winner = game === "bracket" ? detail.champ : game === "blind" ? (detail.names[0] || "—") : (detail.top[0] || "—");
+    const rec = { date, game, g, winner, ...detail };
+    const plays = lsGet("daily-plays", []).filter((p) => !(p.date === date && p.game === game)); // replace same-day replays
+    plays.unshift(rec);
+    lsSet("daily-plays", plays.slice(0, 120));
     const st = lsGet("daily-streak", { count: 0, last: null });
     if (st.last !== date) {
       const yesterday = todayStr(new Date(Date.now() - 86400000));
@@ -1063,7 +1173,8 @@ export default function App() {
   else if (screen === "tier") { const exSet = new Set(excluded); const fp = pool.filter((t) => !exSet.has(t.sub || t.name)); body = <TierList key={unit} pool={unit === "artists" ? artistPool(fp) : fp} label={poolLabel + (unit === "artists" ? " · artists" : "")} onHome={() => setScreen("menu")} />; }
   else if (screen === "festival") body = <Festival pools={{ all: combinedArtists(GENRES), byGenre: Object.fromEntries(GENRES.map((g) => [g.genre, genreArtists(g)])) }} label={poolLabel} onHome={() => setScreen("menu")} />;
   else if (screen === "edit") body = <EditPool genre={genreObj} excluded={excluded} onSave={saveExclusions} onHome={() => setScreen("menu")} />;
-  else if (screen === "daily") body = <DailyHub setup={daily} onPlay={(gm) => setScreen("d-" + gm)} onHome={() => setScreen("connect")} />;
+  else if (screen === "daily") body = <DailyHub setup={daily} onPlay={(gm) => setScreen("d-" + gm)} onStats={(rec) => { setStatsRec(rec && rec.date ? rec : null); setScreen("daily-stats"); }} onHome={() => setScreen("connect")} />;
+  else if (screen === "daily-stats") body = <DailyStats initialRec={statsRec} onHome={() => setScreen("daily")} />;
   else if (screen === "d-bracket") body = <Bracket key="db" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedOrder={daily.bracketOrder} onResult={(r) => recordDaily("bracket", r)} onHome={() => setScreen("daily")} />;
   else if (screen === "d-blind") body = <BlindRank key="dbl" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedItems={daily.blindItems} onResult={(r) => recordDaily("blind", r)} onHome={() => setScreen("daily")} />;
   else if (screen === "d-tier") body = <TierList key="dt" pool={daily.pool} label={daily.genre.genre + " · daily"} fixedItems={daily.tierItems} onResult={(r) => recordDaily("tier", r)} onHome={() => setScreen("daily")} />;
